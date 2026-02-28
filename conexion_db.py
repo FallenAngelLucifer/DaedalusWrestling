@@ -1,0 +1,459 @@
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+class ConexionDB:
+    def __init__(self):
+        # Configura estos parámetros con los de tu servidor PostgreSQL
+        self.host = "localhost"
+        self.database = "DaedalusWrestling"
+        self.user = "postgres"
+        self.password = "sk8erace1mortadela1@"
+        self.port = "5432"
+
+    def conectar(self):
+        try:
+            conexion = psycopg2.connect(
+                host=self.host,
+                database=self.database,
+                user=self.user,
+                password=self.password,
+                port=self.port,
+                options="-c search_path=lucha_olimpica" # Apuntamos al esquema correcto
+            )
+            return conexion
+        except psycopg2.Error as e:
+            print(f"Error conectando a PostgreSQL: {e}")
+            return None
+
+    def obtener_atletas(self):
+        """Devuelve todos los atletas activos con el nombre de su club y ciudad."""
+        query = """
+            SELECT p.id, p.nombre, p.apellidos, p.fecha_nacimiento, p.sexo, 
+                   c.nombre as club, ciu.nombre as ciudad
+            FROM peleador p
+            LEFT JOIN club c ON p.id_club = c.id
+            LEFT JOIN ciudad ciu ON c.id_ciudad = ciu.id
+            WHERE p.activo = TRUE
+            ORDER BY p.apellidos, p.nombre;
+        """
+        return self._ejecutar_select(query)
+
+    def obtener_categorias(self):
+        # Ahora traemos también las edades para poder hacer el filtro en la interfaz
+        query = "SELECT id, nombre, edad_minima, edad_maxima FROM categoria_edad ORDER BY edad_minima;"
+        return self._ejecutar_select(query)
+
+    def _ejecutar_select(self, query, params=None):
+        conexion = self.conectar()
+        if not conexion: return []
+        
+        try:
+            # RealDictCursor nos devuelve los resultados como diccionarios en lugar de tuplas
+            with conexion.cursor(cursor_factory=RealDictCursor) as cursor:
+                cursor.execute(query, params)
+                resultados = cursor.fetchall()
+                return resultados
+        except psycopg2.Error as e:
+            print(f"Error ejecutando consulta: {e}")
+            return []
+        finally:
+            conexion.close()
+
+    # --- NUEVAS FUNCIONES PARA LEER CATÁLOGOS ---
+    def obtener_departamentos(self):
+        return self._ejecutar_select("SELECT id, nombre FROM departamento ORDER BY nombre;")
+
+    def obtener_ciudades(self):
+        # Traemos la ciudad junto con el nombre de su departamento para mayor claridad
+        query = """
+            SELECT c.id, c.nombre, d.nombre as departamento 
+            FROM ciudad c 
+            JOIN departamento d ON c.id_departamento = d.id 
+            ORDER BY c.nombre;
+        """
+        return self._ejecutar_select(query)
+
+    def obtener_clubes(self):
+        return self._ejecutar_select("SELECT id, nombre FROM club WHERE activo = TRUE ORDER BY nombre;")
+
+    def obtener_colegios(self):
+        return self._ejecutar_select("SELECT id, nombre FROM colegio WHERE activo = TRUE ORDER BY nombre;")
+
+    def obtener_oficiales(self):
+        return self._ejecutar_select("SELECT id, nombre, apellidos FROM oficial_arbitraje WHERE activo = TRUE ORDER BY apellidos, nombre;")
+
+    # --- NUEVAS FUNCIONES PARA INSERTAR DATOS ---
+    def _ejecutar_insert(self, query, params):
+        """Función genérica para ejecutar INSERTS y hacer commit."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute(query, params)
+                conexion.commit()
+                return True
+        except psycopg2.Error as e:
+            print(f"Error en INSERT: {e}")
+            conexion.rollback()
+            return False
+        finally:
+            conexion.close()
+
+    def insertar_departamento(self, nombre):
+        return self._ejecutar_insert("INSERT INTO departamento (nombre) VALUES (%s)", (nombre,))
+
+    def insertar_ciudad(self, id_departamento, nombre):
+        return self._ejecutar_insert("INSERT INTO ciudad (id_departamento, nombre) VALUES (%s, %s)", (id_departamento, nombre))
+
+    def insertar_club(self, id_ciudad, nombre):
+        return self._ejecutar_insert("INSERT INTO club (id_ciudad, nombre) VALUES (%s, %s)", (id_ciudad, nombre))
+
+    def insertar_peleador(self, nombre, apellidos, fecha_nac, sexo, id_club, colegio):
+        query = """
+            INSERT INTO peleador (nombre, apellidos, fecha_nacimiento, sexo, id_club, colegio) 
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        return self._ejecutar_insert(query, (nombre, apellidos, fecha_nac, sexo, id_club, colegio))
+
+    def actualizar_peleador(self, id_peleador, nombre, apellidos, fecha_nac, sexo, id_club, colegio):
+        query = """
+            UPDATE peleador 
+            SET nombre = %s, apellidos = %s, fecha_nacimiento = %s, sexo = %s, id_club = %s, colegio = %s
+            WHERE id = %s
+        """
+        return self._ejecutar_insert(query, (nombre, apellidos, fecha_nac, sexo, id_club, colegio, id_peleador))
+
+    def obtener_pesos_oficiales(self):
+        """Trae los límites de peso de la UWW para poder auto-asignar la división."""
+        query = "SELECT id, id_categoria_edad, id_estilo_lucha, peso_minimo, peso_maximo FROM peso_oficial_uww;"
+        return self._ejecutar_select(query)
+
+    def obtener_lista_torneos_debug(self):
+        query = """
+            SELECT t.id, t.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria
+            FROM torneo t
+            JOIN categoria_edad c ON t.id_categoria_edad = c.id
+            ORDER BY t.id DESC
+        """
+        conexion = self.conectar()
+        if not conexion: return []
+        try:
+            with conexion.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query)
+                return cur.fetchall()
+        except Exception as e:
+            print("Error al obtener lista de torneos:", e)
+            return []
+        finally:
+            conexion.close()
+
+    def obtener_torneo_completo_debug(self, id_torneo):
+        query_torneo = """
+            SELECT t.nombre, t.lugar_exacto as lugar, to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria
+            FROM torneo t
+            JOIN categoria_edad c ON t.id_categoria_edad = c.id
+            WHERE t.id = %s
+        """
+        query_inscripciones = """
+            SELECT 
+                i.id_peleador, p.nombre, p.apellidos, p.sexo, 
+                cl.nombre as club, ci.nombre as ciudad, 
+                i.peso_pesaje, el.nombre as estilo, 
+                po.peso_maximo, po.id as id_division
+            FROM inscripcion i
+            JOIN peleador p ON i.id_peleador = p.id
+            LEFT JOIN club cl ON p.id_club = cl.id
+            LEFT JOIN ciudad ci ON cl.id_ciudad = ci.id
+            JOIN torneo_division td ON i.id_torneo_division = td.id
+            JOIN peso_oficial_uww po ON td.id_peso_oficial_uww = po.id
+            JOIN estilo_lucha el ON po.id_estilo_lucha = el.id
+            WHERE td.id_torneo = %s
+        """
+        conexion = self.conectar()
+        if not conexion: return None, []
+        try:
+            with conexion.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query_torneo, (id_torneo,))
+                datos_torneo = cur.fetchone()
+                
+                cur.execute(query_inscripciones, (id_torneo,))
+                inscripciones = cur.fetchall()
+                
+                return datos_torneo, inscripciones
+        except Exception as e:
+            print("Error al obtener torneo debug:", e)
+            return None, []
+        finally:
+            conexion.close()
+
+    def guardar_torneo_completo(self, datos_torneo, inscripciones):
+        conexion = self.conectar()
+        if not conexion: return None
+        try:
+            with conexion.cursor() as cursor:
+                # 1. Crear torneo
+                cursor.execute("""
+                    INSERT INTO torneo (nombre, id_categoria_edad, lugar_exacto, fecha_inicio, fecha_fin) 
+                    VALUES (%s, %s, %s, %s, %s) RETURNING id
+                """, (datos_torneo['nombre'], datos_torneo['id_categoria'], datos_torneo['lugar'], datos_torneo['fecha'], datos_torneo['fecha']))
+                id_torneo = cursor.fetchone()[0]
+
+                # 2. Registrar divisiones e inscripciones
+                divisiones_creadas = {} # Cache para no duplicar divisiones
+                
+                for ins in inscripciones:
+                    for id_peso_oficial in ins['ids_divisiones']:
+                        if id_peso_oficial not in divisiones_creadas:
+                            cursor.execute("""
+                                INSERT INTO torneo_division (id_torneo, id_peso_oficial_uww) 
+                                VALUES (%s, %s) RETURNING id
+                            """, (id_torneo, id_peso_oficial))
+                            divisiones_creadas[id_peso_oficial] = cursor.fetchone()[0]
+                            
+                        id_torneo_division = divisiones_creadas[id_peso_oficial]
+                        
+                        cursor.execute("""
+                            INSERT INTO inscripcion (id_peleador, id_torneo_division, peso_pesaje) 
+                            VALUES (%s, %s, %s)
+                        """, (ins['id_atleta'], id_torneo_division, ins['peso']))
+                
+                conexion.commit()
+                return id_torneo
+        except Exception as e:
+            print(f"Error guardando torneo: {e}")
+            conexion.rollback()
+            return None
+        finally:
+            conexion.close()
+
+    def obtener_inscripciones_pareo(self, id_torneo):
+        """Devuelve los atletas de un torneo ordenados para generar las llaves."""
+        query = """
+            SELECT e.nombre as estilo, p_uww.peso_maximo as peso_cat, 
+                   pel.id as id_peleador, pel.nombre, pel.apellidos, c.nombre as club
+            FROM inscripcion i
+            JOIN torneo_division td ON i.id_torneo_division = td.id
+            JOIN peso_oficial_uww p_uww ON td.id_peso_oficial_uww = p_uww.id
+            JOIN estilo_lucha e ON p_uww.id_estilo_lucha = e.id
+            JOIN peleador pel ON i.id_peleador = pel.id
+            LEFT JOIN club c ON pel.id_club = c.id
+            WHERE td.id_torneo = %s
+            ORDER BY e.nombre, p_uww.peso_maximo, pel.apellidos;
+        """
+        return self._ejecutar_select(query, (id_torneo,))
+
+    def bloquear_y_guardar_llave(self, id_torneo, nombre_estilo, peso_str, llave_array):
+        """Guarda la posición exacta de cada atleta al bloquear la llave."""
+        # Limpiar el string "74 kg" para obtener solo el número
+        peso_max = int(peso_str.replace(" kg", "").strip())
+        
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                # 1. Encontrar el ID de la división (Torneo + Estilo + Peso)
+                cur.execute("""
+                    SELECT td.id FROM torneo_division td
+                    JOIN peso_oficial_uww p ON td.id_peso_oficial_uww = p.id
+                    JOIN estilo_lucha e ON p.id_estilo_lucha = e.id
+                    WHERE td.id_torneo = %s AND e.nombre = %s AND p.peso_maximo = %s
+                """, (id_torneo, nombre_estilo, peso_max))
+                res = cur.fetchone()
+                if not res: return False
+                id_td = res[0]
+
+                # 2. Guardar el orden de siembra
+                for index, atleta in enumerate(llave_array):
+                    if atleta is not None:
+                        cur.execute("""
+                            UPDATE inscripcion 
+                            SET orden_siembra = %s 
+                            WHERE id_torneo_division = %s AND id_peleador = %s
+                        """, (index, id_td, atleta['id']))
+                
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error bloqueando llave: {e}")
+            conexion.rollback()
+            return False
+        finally:
+            conexion.close()
+
+    def cargar_llave_bloqueada(self, id_torneo, nombre_estilo, peso_str, potencia):
+        """Si la llave ya fue bloqueada antes, la devuelve ordenada. Si no, devuelve None."""
+        peso_max = int(peso_str.replace(" kg", "").strip())
+        conexion = self.conectar()
+        if not conexion: return None
+        try:
+            with conexion.cursor(cursor_factory=RealDictCursor) as cur:
+                # Verificar si ya tienen un orden de siembra asignado
+                cur.execute("""
+                    SELECT i.orden_siembra, p.id, p.nombre, p.apellidos, c.nombre as club, ciu.nombre as ciudad
+                    FROM inscripcion i
+                    JOIN torneo_division td ON i.id_torneo_division = td.id
+                    JOIN peso_oficial_uww po ON td.id_peso_oficial_uww = po.id
+                    JOIN estilo_lucha e ON po.id_estilo_lucha = e.id
+                    JOIN peleador p ON i.id_peleador = p.id
+                    LEFT JOIN club c ON p.id_club = c.id
+                    LEFT JOIN ciudad ciu ON c.id_ciudad = ciu.id
+                    WHERE td.id_torneo = %s AND e.nombre = %s AND po.peso_maximo = %s
+                      AND i.orden_siembra IS NOT NULL
+                """, (id_torneo, nombre_estilo, peso_max))
+                
+                atletas_bloqueados = cur.fetchall()
+                
+                if not atletas_bloqueados:
+                    return None # Significa que nunca se le ha dado a "Confirmar Llave"
+                    
+                # Reconstruir el array usando la matemática guardada
+                llave_array = [None] * potencia
+                for a in atletas_bloqueados:
+                    idx = a['orden_siembra']
+                    if idx < potencia:
+                        llave_array[idx] = {
+                            "id": a['id'],
+                            "nombre": f"{a['apellidos']}, {a['nombre']}",
+                            "club": a['club'] or "Sin Club",
+                            "ciudad": a['ciudad'] or "No especificada"
+                        }
+                return llave_array
+        except Exception as e:
+            print(f"Error cargando llave bloqueada: {e}")
+            return None
+        finally:
+            conexion.close()
+
+    def guardar_resultado_combate(self, id_torneo, estilo, peso_str, match_id, id_peleador_rojo, id_peleador_azul, id_peleador_ganador, motivo_str, id_arbitro=None, id_juez=None, id_jefe_tapiz=None, puntos_rojo=0, puntos_azul=0, historial=None):
+        peso_max = int(peso_str.replace(" kg", "").strip())
+        codigo_uww = motivo_str.split(" - ")[0].strip() 
+        
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                cur.execute("""
+                    SELECT td.id FROM torneo_division td
+                    JOIN peso_oficial_uww p ON td.id_peso_oficial_uww = p.id
+                    JOIN estilo_lucha e ON p.id_estilo_lucha = e.id
+                    WHERE td.id_torneo = %s AND e.nombre = %s AND p.peso_maximo = %s
+                """, (id_torneo, estilo, peso_max))
+                res = cur.fetchone()
+                if not res: return False
+                id_td = res[0]
+
+                def get_id_inscripcion(id_pel):
+                    if not id_pel: return None
+                    cur.execute("SELECT id FROM inscripcion WHERE id_torneo_division = %s AND id_peleador = %s", (id_td, id_pel))
+                    r = cur.fetchone()
+                    return r[0] if r else None
+                    
+                id_ins_rojo = get_id_inscripcion(id_peleador_rojo)
+                id_ins_azul = get_id_inscripcion(id_peleador_azul)
+                id_ins_ganador = get_id_inscripcion(id_peleador_ganador)
+
+                if not id_ins_rojo or not id_ins_azul: return False
+
+                cur.execute("SELECT id FROM tipo_victoria WHERE codigo_uww = %s", (codigo_uww,))
+                tv_res = cur.fetchone()
+                id_tv = tv_res[0] if tv_res else None
+
+                cur.execute("SELECT id FROM combate WHERE id_torneo_division = %s AND identificador_llave = %s", (id_td, match_id))
+                comb_existente = cur.fetchone()
+
+                id_combate = None
+
+                if comb_existente:
+                    id_combate = comb_existente[0]
+                    cur.execute("""
+                        UPDATE combate 
+                        SET id_inscripcion_ganador = %s, id_tipo_victoria = %s, 
+                            id_arbitro = %s, id_juez = %s, id_jefe_tapiz = %s, estado = 'Finalizado',
+                            puntos_tecnicos_rojo = %s, puntos_tecnicos_azul = %s
+                        WHERE id = %s
+                    """, (id_ins_ganador, id_tv, id_arbitro, id_juez, id_jefe_tapiz, puntos_rojo, puntos_azul, id_combate))
+                else:
+                    cur.execute("""
+                        INSERT INTO combate (id_torneo_division, id_fase, id_inscripcion_rojo, id_inscripcion_azul, id_inscripcion_ganador, id_tipo_victoria, id_arbitro, id_juez, id_jefe_tapiz, puntos_tecnicos_rojo, puntos_tecnicos_azul, orden_pelea, estado, identificador_llave)
+                        VALUES (%s, (SELECT id FROM fase_combate LIMIT 1), %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, 'Finalizado', %s) RETURNING id
+                    """, (id_td, id_ins_rojo, id_ins_azul, id_ins_ganador, id_tv, id_arbitro, id_juez, id_jefe_tapiz, puntos_rojo, puntos_azul, match_id))
+                    id_combate = cur.fetchone()[0]
+
+                # Insertar historial de puntos (Solo si venimos del marcador en vivo)
+                if historial is not None:
+                    cur.execute("DELETE FROM puntuacion_combate WHERE id_combate = %s", (id_combate,))
+                    for acc in historial:
+                        tipo_accion = 'Penalización' if acc['is_p'] else 'Técnica'
+                        esquina = 'Rojo' if acc['esquina'] == 'rojo' else 'Azul'
+                        cur.execute("""
+                            INSERT INTO puntuacion_combate (id_combate, color_esquina, periodo, valor_puntos, tipo_accion, orden_anotacion)
+                            VALUES (%s, %s, %s, %s, %s, %s)
+                        """, (id_combate, esquina, acc['periodo'], acc['puntos'], tipo_accion, acc['orden']))
+
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error guardando resultado de combate: {e}")
+            conexion.rollback()
+            return False
+        finally:
+            conexion.close()
+
+    def cargar_resultados_combates(self, id_torneo):
+        """Carga en memoria todos los combates que ya se jugaron al abrir el torneo."""
+        conexion = self.conectar()
+        if not conexion: return {}
+        try:
+            with conexion.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT e.nombre as estilo, p.peso_maximo, c.identificador_llave,
+                           c.id as id_combate, c.id_arbitro, c.id_juez, c.id_jefe_tapiz,
+                           pel.id as id_ganador, pel.nombre, pel.apellidos, 
+                           cl.nombre as club, ci.nombre as ciudad,
+                           tv.codigo_uww, tv.descripcion as motivo_desc
+                    FROM combate c
+                    JOIN torneo_division td ON c.id_torneo_division = td.id
+                    JOIN peso_oficial_uww p ON td.id_peso_oficial_uww = p.id
+                    JOIN estilo_lucha e ON p.id_estilo_lucha = e.id
+                    JOIN inscripcion i_gan ON c.id_inscripcion_ganador = i_gan.id
+                    JOIN peleador pel ON i_gan.id_peleador = pel.id
+                    LEFT JOIN club cl ON pel.id_club = cl.id
+                    LEFT JOIN ciudad ci ON cl.id_ciudad = ci.id
+                    LEFT JOIN tipo_victoria tv ON c.id_tipo_victoria = tv.id
+                    WHERE td.id_torneo = %s AND c.estado = 'Finalizado' AND c.identificador_llave IS NOT NULL
+                """, (id_torneo,))
+                
+                resultados = cur.fetchall()
+                dict_resultados = {}
+                
+                for r in resultados:
+                    llave_key = f"{r['estilo']}-{r['peso_maximo']} kg"
+                    if llave_key not in dict_resultados:
+                        dict_resultados[llave_key] = {}
+                        
+                    motivo = f"{r['codigo_uww']} - {r['motivo_desc']}" if r['codigo_uww'] else "Decisión"
+                    
+                    # Reconstruye la memoria agregando los árbitros y el ID del combate
+                    dict_resultados[llave_key][r['identificador_llave']] = {
+                        "id": r['id_ganador'],
+                        "nombre": f"{r['apellidos']}, {r['nombre']}",
+                        "club": r['club'] or "Sin Club",
+                        "ciudad": r['ciudad'] or "No especificada",
+                        "motivo_victoria": motivo,
+                        "id_combate": r['id_combate'],
+                        "id_arbitro": r['id_arbitro'],
+                        "id_juez": r['id_juez'],
+                        "id_jefe_tapiz": r['id_jefe_tapiz']
+                    }
+                return dict_resultados
+        except Exception as e:
+            print(f"Error cargando resultados de combates: {e}")
+            return {}
+        finally:
+            conexion.close()
+
+    def obtener_puntuacion_combate(self, id_combate):
+        """Consulta el historial de puntos exactos de un combate desde la BD."""
+        # AÑADIMOS 'tipo_accion' A LA CONSULTA SQL
+        query = "SELECT color_esquina, periodo, valor_puntos, tipo_accion FROM puntuacion_combate WHERE id_combate = %s ORDER BY orden_anotacion;"
+        return self._ejecutar_select(query, (id_combate,))
