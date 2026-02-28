@@ -369,13 +369,23 @@ class ConexionDB:
                         UPDATE combate 
                         SET id_inscripcion_ganador = %s, id_tipo_victoria = %s, 
                             id_arbitro = %s, id_juez = %s, id_jefe_tapiz = %s, estado = 'Finalizado',
-                            puntos_tecnicos_rojo = %s, puntos_tecnicos_azul = %s
+                            puntos_tecnicos_rojo = %s, puntos_tecnicos_azul = %s, hora_fin = CURRENT_TIMESTAMP
                         WHERE id = %s
                     """, (id_ins_ganador, id_tv, id_arbitro, id_juez, id_jefe_tapiz, puntos_rojo, puntos_azul, id_combate))
                 else:
                     cur.execute("""
-                        INSERT INTO combate (id_torneo_division, id_fase, id_inscripcion_rojo, id_inscripcion_azul, id_inscripcion_ganador, id_tipo_victoria, id_arbitro, id_juez, id_jefe_tapiz, puntos_tecnicos_rojo, puntos_tecnicos_azul, orden_pelea, estado, identificador_llave)
-                        VALUES (%s, (SELECT id FROM fase_combate LIMIT 1), %s, %s, %s, %s, %s, %s, %s, %s, %s, 1, 'Finalizado', %s) RETURNING id
+                        INSERT INTO combate (
+                            id_torneo_division, id_fase, id_inscripcion_rojo, id_inscripcion_azul, 
+                            id_inscripcion_ganador, id_tipo_victoria, id_arbitro, id_juez, 
+                            id_jefe_tapiz, puntos_tecnicos_rojo, puntos_tecnicos_azul, 
+                            orden_pelea, estado, identificador_llave, hora_fin
+                        )
+                        VALUES (
+                            %s, (SELECT id FROM fase_combate LIMIT 1), %s, %s, 
+                            %s, %s, %s, %s, 
+                            %s, %s, %s, 
+                            1, 'Finalizado', %s, CURRENT_TIMESTAMP
+                        ) RETURNING id
                     """, (id_td, id_ins_rojo, id_ins_azul, id_ins_ganador, id_tv, id_arbitro, id_juez, id_jefe_tapiz, puntos_rojo, puntos_azul, match_id))
                     id_combate = cur.fetchone()[0]
 

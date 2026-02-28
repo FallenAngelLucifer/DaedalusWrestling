@@ -32,13 +32,15 @@ class VentanaCombate(tk.Toplevel):
         # Catálogo Oficial de Victorias (UWW)
         self.tipos_victoria = [
             "VFA - Victoria por Toque (Fall)",
+            "VAB - Victoria por Abandono",
             "VIN - Victoria por Lesión",
+            "VFO - Victoria por Forfeit (Incomparecencia)",
+            "DSQ - Descalificación por mala conducta",
             "VCA - Victoria por Amonestaciones (3 cautions)",
             "VSU - Superioridad Técnica (sin puntos del perdedor)",
             "VSU1 - Superioridad Técnica (con puntos del perdedor)",
-            "VPO - Victoria por Puntos (sin puntos del perdedor)",
             "VPO1 - Victoria por Puntos (con puntos del perdedor)",
-            "DSQ - Descalificación por mala conducta"
+            "VPO - Victoria por Puntos (sin puntos del perdedor)"
         ]
 
         self.oficiales_db = parent.db.obtener_oficiales()

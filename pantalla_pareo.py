@@ -1,7 +1,14 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import math
+import os
 from conexion_db import ConexionDB
+
+try:
+    import fitz  # PyMuPDF
+    PDF_DISPONIBLE = True
+except ImportError:
+    PDF_DISPONIBLE = False
 
 class PantallaPareo(ttk.Frame):
     def __init__(self, parent, controller):
@@ -17,7 +24,7 @@ class PantallaPareo(ttk.Frame):
         self.modo_edicion = True
         self.caja_seleccionada = None
         self.llaves_generadas = {} # Guarda el array de atletas pareados por división
-        self.resultados_combates = {} # <-- NUEVA LÍNEA: Guarda ganadores
+        self.resultados_combates = {} # <-- Guarda ganadores
         
         # Variables para Tooltip
         self.tooltip_window = None
@@ -411,11 +418,223 @@ class PantallaPareo(ttk.Frame):
         btn_frame.pack(pady=(10, 0))
         
         if match_node.get("ganador") is not None:
-            ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack()
+            ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="📄 PDF", command=lambda: self.exportar_pdf(match_node, tab)).pack(side="left", padx=5)
         elif p_rojo is not None and p_azul is not None:
             ttk.Button(btn_frame, text="Iniciar Pelea", command=lambda: self.iniciar_pelea(match_node, tab, llave_key)).pack()
         else:
             ttk.Label(btn_frame, text="Esperando clasificado...", font=("Helvetica", 9, "italic")).pack()
+
+    # ================= EXPORTACIÓN A PDF DESDE PAREO =================
+    def exportar_pdf(self, match_node, tab):
+        if not PDF_DISPONIBLE: return messagebox.showerror("Error", "PyMuPDF no está instalada.")
+            
+        ruta_plantilla = "hoja_anotacion.pdf" 
+        if not os.path.exists(ruta_plantilla): return messagebox.showerror("Error", f"No se encontró '{ruta_plantilla}'.")
+
+        p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
+        p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
+        ganador_data = match_node.get("ganador", {})
+        id_combate = ganador_data.get("id_combate")
+
+        if not id_combate:
+            return messagebox.showerror("Error", "No se encontró el ID del combate. Verifica que esté guardado en la base de datos.")
+
+        apellido_rojo = p_rojo['nombre'].split(',')[0].replace(' ', '_')
+        apellido_azul = p_azul['nombre'].split(',')[0].replace(' ', '_')
+        ruta_guardado = filedialog.asksaveasfilename(
+            defaultextension=".pdf", filetypes=[("PDF", "*.pdf")],
+            initialfile=f"Hoja_Puntuacion_R{match_node['ronda']}_{apellido_rojo}_vs_{apellido_azul}.pdf"
+        )
+        if not ruta_guardado: return
+
+        # 1. Recuperar los datos del Torneo y hora de fin
+        torneo_nombre = ""
+        torneo_fecha = ""
+        hora_fin_combate = "" # <-- Nueva variable
+        conexion = self.db.conectar()
+        if conexion:
+            try:
+                with conexion.cursor() as cur:
+                    # Añadimos c.hora_fin a la consulta
+                    cur.execute("""
+                        SELECT t.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY'), to_char(c.hora_fin, 'HH24:MI')
+                        FROM combate c
+                        JOIN torneo_division td ON c.id_torneo_division = td.id
+                        JOIN torneo t ON td.id_torneo = t.id
+                        WHERE c.id = %s
+                    """, (id_combate,))
+                    res = cur.fetchone()
+                    if res:
+                        torneo_nombre, torneo_fecha = res[0], res[1]
+                        hora_fin_combate = res[2] # <-- Capturamos la hora
+            except Exception as e: 
+                print("Error consultando datos del torneo:", e)
+            finally: 
+                conexion.close()
+
+        # 2. Extraer Nombres de Oficiales cruzando el ID con la BD
+        oficiales_db = self.db.obtener_oficiales()
+        dict_oficiales = {o['id']: f"{o['apellidos']}, {o['nombre']}" for o in oficiales_db}
+        nom_arbitro = dict_oficiales.get(ganador_data.get("id_arbitro"), "")
+        nom_juez = dict_oficiales.get(ganador_data.get("id_juez"), "")
+        nom_jefe = dict_oficiales.get(ganador_data.get("id_jefe_tapiz"), "")
+
+        # 3. Extraer y Calcular Puntos desde la BD
+        puntos_historicos = self.db.obtener_puntuacion_combate(id_combate)
+        p1_r, p2_r, p1_a, p2_a = 0, 0, 0, 0
+        for pt in puntos_historicos:
+            val = pt['valor_puntos']
+            if pt['color_esquina'] == 'Rojo':
+                if pt['periodo'] == 1: p1_r += val
+                else: p2_r += val
+            else:
+                if pt['periodo'] == 1: p1_a += val
+                else: p2_a += val
+        
+        total_r = p1_r + p2_r
+        total_a = p1_a + p2_a
+        
+        nombre_ganador = ganador_data.get("nombre", "")
+        motivo_victoria = ganador_data.get("motivo_victoria", "")
+        codigo_victoria = motivo_victoria.split(" - ")[0] if motivo_victoria else ""
+
+        # 4. Generación del PDF
+        try:
+            from datetime import datetime
+            #hora_actual = datetime.now().strftime("%H:%M") 
+
+            doc = fitz.open(ruta_plantilla)
+            page = doc[0]
+
+            def escribir(texto, x, y, size=10, color=(0, 0, 0)):
+                if texto is not None and str(texto).strip() != "":
+                    page.insert_text(fitz.Point(x, y), str(texto), fontsize=size, color=color)
+
+            # ================= CALIBRACIÓN MILIMÉTRICA EXACTA =================
+            
+            # 1. ENCABEZADO SUPERIOR
+            escribir(torneo_nombre, 78, 132, size=10) 
+            
+            escribir(nom_arbitro, 360, 115, size=8) 
+            escribir(nom_juez, 360, 138, size=8)    
+            escribir(nom_jefe, 360, 160, size=8)  
+
+            # 2. FILA DE INFORMACIÓN DEL COMBATE
+            y_info = 203
+            escribir(torneo_fecha, 90, y_info, size=9)          
+            escribir(f"{match_node['match_id']}", 170, y_info, size=9) 
+            escribir(tab.cmb_peso.get(), 240, y_info, size=9)          
+            escribir(tab.estilo, 295, y_info, size=9)                  
+            escribir(f"{match_node['ronda']}", 375, y_info, size=9) 
+            escribir("Fase", 430, y_info, size=9)                           
+            escribir("Tapiz A", 495, y_info, size=9)                        
+
+            # 3. NOMBRES DE ATLETAS Y CLUBES 
+            y_nombres = 254
+            escribir(p_rojo['nombre'], 75, y_nombres, size=8, color=(0, 0, 0))
+            escribir(p_rojo['club'], 183, y_nombres, size=7)
+            
+            escribir(p_azul['nombre'], 322, y_nombres, size=8, color=(0, 0, 0))
+            escribir(p_azul['club'], 429, y_nombres, size=7)
+
+            # 4. CUADRÍCULA DE PUNTOS TÉCNICOS POR PERIODO
+            x_p1_r, y_p1_r = 110, 292  
+            x_p2_r, y_p2_r = 110, 320  
+            
+            x_p1_a, y_p1_a = 358, 292  
+            x_p2_a, y_p2_a = 358, 320  
+            
+            espaciado = 15 
+            ultimo_punto_ganador = None
+
+            for pt in puntos_historicos:
+                texto_pt = "P" if pt['tipo_accion'] == 'Penalización' else str(pt['valor_puntos'])
+                
+                if pt['color_esquina'] == 'Rojo':
+                    if pt['periodo'] == 1:
+                        escribir(texto_pt, x_p1_r, y_p1_r, color=(0.8, 0, 0), size=10)
+                        if p_rojo['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p1_r, y_p1_r)
+                        x_p1_r += espaciado
+                    else:
+                        escribir(texto_pt, x_p2_r, y_p2_r, color=(0.8, 0, 0), size=10)
+                        if p_rojo['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p2_r, y_p2_r)
+                        x_p2_r += espaciado
+                else: 
+                    if pt['periodo'] == 1:
+                        escribir(texto_pt, x_p1_a, y_p1_a, color=(0, 0, 0.8), size=10)
+                        if p_azul['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p1_a, y_p1_a)
+                        x_p1_a += espaciado
+                    else:
+                        escribir(texto_pt, x_p2_a, y_p2_a, color=(0, 0, 0.8), size=10)
+                        if p_azul['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p2_a, y_p2_a)
+                        x_p2_a += espaciado
+
+            # 5. TOTALES DESGLOSADOS POR PERIODO 
+            escribir(p1_r, 269, y_p1_r, size=11, color=(0.8, 0, 0))
+            escribir(p2_r, 269, y_p2_r, size=11, color=(0.8, 0, 0))
+            
+            escribir(p1_a, 518, y_p1_a, size=11, color=(0, 0, 0.8))
+            escribir(p2_a, 518, y_p2_a, size=11, color=(0, 0, 0.8))
+
+            # 6. TOTALES GENERALES DEL COMBATE 
+            escribir(total_r, 82, 357, size=16, color=(0.8, 0, 0))
+            escribir(total_a, 516, 357, size=16, color=(0, 0, 0.8))
+
+            # 7. PUNTOS DE CLASIFICACIÓN Y TACHAR PERDEDOR
+            pts_gan = 0; pts_per = 0
+            
+            if codigo_victoria in ["VFA", "VIN", "VCA", "DSQ", "VF", "VA", "VB"]: pts_gan = 5
+            elif codigo_victoria == "VSU": pts_gan = 4
+            elif codigo_victoria == "VSU1": pts_gan = 4; pts_per = 1
+            elif codigo_victoria == "VPO": pts_gan = 3
+            elif codigo_victoria == "VPO1": pts_gan = 3; pts_per = 1
+
+            if nombre_ganador == p_rojo['nombre']:
+                clas_rojo, clas_azul = pts_gan, pts_per
+            else:
+                clas_rojo, clas_azul = pts_per, pts_gan
+
+            escribir(clas_rojo, 252, 408, size=16, color=(0.8, 0, 0))
+            escribir(clas_azul, 346, 408, size=16, color=(0, 0, 0.8))
+
+            # 8. GANADOR Y HORA DE FINALIZACIÓN
+            # Si el combate terminó, usamos la hora de la BD. Si no (por algún error), ponemos --:--
+            hora_pdf = hora_fin_combate if hora_fin_combate else "--:--" 
+            
+            escribir(nombre_ganador, 80, 448, size=11)
+            escribir(hora_pdf, 448, 448, size=11)
+
+            # 9. CÍRCULO EN EL ÚLTIMO PUNTO (Solo para VFA)
+            if ultimo_punto_ganador:
+                page.draw_circle(fitz.Point(ultimo_punto_ganador[0] + 3, ultimo_punto_ganador[1] - 3), radius=6, color=(0.1, 0.6, 0.1), width=1.5)
+            
+            # 10. EL CHECKMARK (✔) EN LA TABLA DE REGLAMENTO
+            # --- Variables de calibración rápida ---
+            x_base = 85        # Ajusta para mover a la izquierda/derecha
+            y_base = 490       # Posición Y del primer elemento (VT / VFA)
+            alto_fila = 23     # Distancia en píxeles entre cada fila
+            
+            # Orden de las opciones de arriba hacia abajo en tu PDF
+            orden_victorias = ["VFA", "VAB", "VIN", "VFO", "DSQ", "VCA", "VSU", "VSU1", "VPO1", "VPO"]    
+            
+            if codigo_victoria in orden_victorias:
+                indice = orden_victorias.index(codigo_victoria)
+                y_check = y_base + (indice * alto_fila)
+                
+                # Dibujo del check (✔)
+                p1 = fitz.Point(x_base, y_check - 2)
+                p2 = fitz.Point(x_base + 5, y_check + 6)
+                p3 = fitz.Point(x_base + 15, y_check - 8)
+                page.draw_line(p1, p2, color=(0.1, 0.7, 0.1), width=2.5)
+                page.draw_line(p2, p3, color=(0.1, 0.7, 0.1), width=2.5)
+
+            doc.save(ruta_guardado)
+            doc.close()
+            messagebox.showinfo("Éxito", f"Hoja técnica exportada correctamente.")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Ocurrió un error al generar el PDF:\n{str(e)}")
 
     def iniciar_pelea(self, match_node, tab, llave_key):
         from ventana_combate import VentanaCombate 

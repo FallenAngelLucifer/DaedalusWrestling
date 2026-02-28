@@ -30,7 +30,6 @@
     <Compile Include="ventana_nuevo_atleta.py" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="ficha_tecnica.pdf" />
     <Content Include="Libraries.txt" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
