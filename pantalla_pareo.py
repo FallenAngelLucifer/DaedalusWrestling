@@ -2,7 +2,20 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import math
 import os
+from PIL import Image, EpsImagePlugin
 from conexion_db import ConexionDB
+from utilidades import ComboBuscador
+
+# --- COLOR ORIGINAL DEL FONDO ---
+COLOR_FONDO_UI = (30, 30, 30) # Corresponde a #1e1e1e en RGB
+
+# RUTA DINÁMICA: Intenta detectar si el archivo existe antes de asignarlo
+gs_path = r"C:\Program Files\gs\gs10.06.0\bin\gswin64c.exe"
+
+if os.path.exists(gs_path):
+    EpsImagePlugin.gs_windows_binary = gs_path
+else:
+    print(f"ADVERTENCIA: No se encontró Ghostscript en {gs_path}. Verifique la instalación.")
 
 try:
     import fitz  # PyMuPDF
@@ -23,28 +36,160 @@ class PantallaPareo(ttk.Frame):
         # Variables de control
         self.modo_edicion = True
         self.caja_seleccionada = None
-        self.llaves_generadas = {} # Guarda el array de atletas pareados por división
-        self.resultados_combates = {} # <-- Guarda ganadores
-        
+        self.llaves_generadas = {} 
+        self.resultados_combates = {} 
+        self.divisiones_bloqueadas = set() 
+        self.grids_generados = {}          
+
         # Variables para Tooltip
         self.tooltip_window = None
         self.caja_hover_actual = None
         
-        lbl_titulo = ttk.Label(self, text="Fase 2: Desarrollo de Pareo (Brackets)", font=("Helvetica", 16, "bold"))
-        lbl_titulo.pack(pady=10)
+        # --- NUEVO: Frame de encabezado para navegación y título ---
+        header_frame = ttk.Frame(self)
+        header_frame.pack(fill="x", pady=10)
 
-        # Contenedor dinámico (se llenará cuando se cargue un torneo)
+        # Botón para regresar a la pantalla anterior
+        self.btn_regresar = ttk.Button(header_frame, text="⬅ Regresar a Inscripción", command=self.regresar_a_inscripcion)
+        self.btn_regresar.pack(side="left", padx=20)
+
+        # --- NUEVOS BOTONES GLOBALES ---
+        self.btn_confirmar_todas = tk.Button(header_frame, text="✅ Confirmar Todas", bg="#2c3e50", fg="white", 
+                                              command=self.confirmar_todas_las_llaves)
+        self.btn_confirmar_todas.pack(side="left", padx=5)
+
+        self.btn_exportar_todas_img = tk.Button(header_frame, text="🖼 Exportar Todas (IMG)", bg="#17a2b8", fg="white",
+                                                command=self.exportar_todas_las_imagenes)
+        self.btn_exportar_todas_img.pack(side="left", padx=5)
+        
+        # Verificar si debemos ocultar el botón al cargar
+        self.after(100, self.verificar_visibilidad_confirmar_todas)
+
+        lbl_titulo = ttk.Label(header_frame, text="Fase 2: Desarrollo de Pareo (Brackets)", font=("Helvetica", 16, "bold"))
+        lbl_titulo.pack(side="left", expand=True, padx=(0, 150)) # El padding derecho ayuda a centrar el texto
+
+        # Contenedor dinámico
         self.contenedor_principal = ttk.Frame(self)
         self.contenedor_principal.pack(fill="both", expand=True)
 
+    def verificar_visibilidad_confirmar_todas(self):
+        total_divs = sum(len(p) for p in self.datos.values())
+        if len(self.divisiones_bloqueadas) >= total_divs and total_divs > 0:
+            self.btn_confirmar_todas.pack_forget()
+
+    def confirmar_todas_las_llaves(self):
+        """Bloquea todas las divisiones del torneo de un solo golpe."""
+        if not self.datos: return
+        confirmado = messagebox.askyesno("Confirmación Masiva", "¿Desea confirmar y bloquear TODAS las llaves del torneo?")
+        if confirmado:
+            for estilo, pesos in self.datos.items():
+                for peso in pesos.keys():
+                    # Llamamos a tu lógica de bloqueo (pasar mostrar_msg=False para evitar spam de alertas)
+                    self.bloquear_llave(estilo, peso, mostrar_msg=False)
+            messagebox.showinfo("Éxito", "Todas las llaves han sido bloqueadas.")
+            self.btn_confirmar_todas.pack_forget()
+
+    def exportar_imagen_llave(self, tab=None, ruta_directa=None):
+        """Exporta la llave completa con fondo oscuro, colores vivos y alta nitidez."""
+        if not tab: tab = self.notebook.nametowidget(self.notebook.select())
+        
+        tab.canvas.update()
+        bbox = tab.canvas.bbox("all")
+        if not bbox: return False
+        
+        x1, y1, x2, y2 = bbox
+        # Aumentamos margen para evitar que se corten los bordes exteriores
+        ancho, alto = (x2 - x1 + 120), (y2 - y1 + 120)
+        
+        estilo = getattr(tab, "estilo", "Estilo")
+        peso = tab.cmb_peso.get() or "Peso"
+        
+        if not ruta_directa:
+            ruta_directa = filedialog.asksaveasfilename(
+                defaultextension=".png",
+                filetypes=[("Imagen PNG", "*.png")],
+                initialfile=f"Llave_{estilo}_{peso}.png"
+            )
+        if not ruta_directa: return False
+
+        ps_temp = f"temp_export_{self.id_torneo}.ps"
+        try:
+            # Captura con coordenadas ajustadas para incluir el margen
+            tab.canvas.postscript(
+                file=ps_temp, colormode='color',
+                x=x1 - 60, y=y1 - 60, 
+                width=ancho, height=alto,
+                pagewidth=ancho, pageheight=alto
+            )
+            
+            with Image.open(ps_temp) as img:
+                # scale=4 es vital para que las líneas de 2px se vean sólidas y no pixeladas
+                img.load(scale=4) 
+                
+                # Restaurar el fondo gris original (#1e1e1e -> 30,30,30)
+                fondo_final = Image.new("RGB", img.size, COLOR_FONDO_UI)
+                
+                if img.mode == 'RGBA':
+                    fondo_final.paste(img, (0, 0), img.split()[3])
+                else:
+                    fondo_final.paste(img)
+                
+                fondo_final.save(ruta_directa, "PNG", dpi=(300, 300))
+            
+            if os.path.exists(ps_temp): os.remove(ps_temp)
+            return True
+        except Exception as e:
+            messagebox.showerror("Error", f"Fallo al crear imagen: {e}")
+            return False
+
+    def exportar_todas_las_imagenes(self):
+        """Crea carpeta con ID_Torneo/Categoría_Peso.png en el directorio elegido."""
+        dir_padre = filedialog.askdirectory(title="Seleccione dónde crear la carpeta de llaves")
+        if not dir_padre: return
+
+        nombre_carpeta = f"Torneo_{self.id_torneo}_Llaves_IMG"
+        ruta_final = os.path.join(dir_padre, nombre_carpeta)
+        if not os.path.exists(ruta_final): os.makedirs(ruta_final)
+
+        for tab in self.notebook.winfo_children():
+            if not hasattr(tab, "cmb_peso"): continue
+            
+            estilo = getattr(tab, "estilo")
+            for p in tab.cmb_peso['values']:
+                tab.cmb_peso.set(p)
+                self.procesar_y_dibujar(tab)
+                self.update() # Forzar refresco para capturar atletas reales
+                
+                nombre_archivo = f"{estilo}_{p}.png".replace(" ", "_")
+                self.exportar_imagen_llave(tab, os.path.join(ruta_final, nombre_archivo))
+
+        messagebox.showinfo("Proceso Terminado", f"Imágenes guardadas en:\n{ruta_final}")
+
+    def regresar_a_inscripcion(self):
+        """Regresa a la pantalla de inscripción manteniendo el torneo actual en memoria."""
+        from pantalla_inscripcion import PantallaInscripcion
+        self.controller.mostrar_pantalla(PantallaInscripcion)
+
     def cargar_torneo(self, id_torneo):
         self.id_torneo = id_torneo
+
+        # --- NUEVO: Verificar si el torneo ya tiene fecha_fin en la BD ---
+        self.torneo_cerrado_en_db = False
+        conexion = self.db.conectar()
+        if conexion:
+            try:
+                with conexion.cursor() as cur:
+                    cur.execute("SELECT fecha_fin FROM torneo WHERE id = %s", (self.id_torneo,))
+                    res = cur.fetchone()
+                    if res and res[0] is not None:
+                        self.torneo_cerrado_en_db = True
+            finally: conexion.close()
+
         inscripciones = self.db.obtener_inscripciones_pareo(self.id_torneo)
         
         # 1. Limpiar pantalla anterior y diccionarios
         for widget in self.contenedor_principal.winfo_children(): widget.destroy()
         self.datos.clear()
-        self.llaves_generadas.clear()
         self.resultados_combates = self.db.cargar_resultados_combates(self.id_torneo)
 
         # 2. Agrupar datos por Estilo y Peso
@@ -61,28 +206,290 @@ class PantallaPareo(ttk.Frame):
                 "ciudad": ins.get('ciudad', 'No especificada')
             })
 
-        # 3. Crear Pestañas Dinámicas (Solo los estilos que tienen atletas)
+        # --- PRECARGAR TODAS LAS LLAVES EN MEMORIA ---
+        self.pre_cargar_memoria()
+        
+        # 3. Crear Pestañas
         self.notebook = ttk.Notebook(self.contenedor_principal)
         self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
+
+        self.tab_cartelera = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(self.tab_cartelera, text="📋 CARTELERA GENERAL")
+        self.construir_interfaz_cartelera()
+        self.notebook.bind("<<NotebookTabChanged>>", self.al_cambiar_pestana)
 
         for estilo, pesos_dict in self.datos.items():
             tab = ttk.Frame(self.notebook, padding=10)
             self.notebook.add(tab, text=estilo)
             self.construir_tab_estilo(tab, estilo, pesos_dict)
+            
+        # --- VERIFICAR SI EL TORNEO YA ESTÁ FINALIZADO ---
+        self.verificar_estado_torneo()
+
+    def pre_cargar_memoria(self):
+        """Genera el grid de todas las llaves sin necesidad de visualizarlas."""
+        self.divisiones_bloqueadas.clear()
+        self.grids_generados.clear()
+        
+        for estilo, pesos_dict in self.datos.items():
+            for peso, atletas in pesos_dict.items():
+                llave_key = f"{estilo}-{peso}"
+                n = len(atletas)
+                potencia = 2 ** math.ceil(math.log2(n)) if n > 1 else 1
+                
+                # Cargar desde BD
+                llave_guardada = self.db.cargar_llave_bloqueada(self.id_torneo, estilo, peso, potencia)
+                if llave_guardada:
+                    self.llaves_generadas[llave_key] = llave_guardada
+                    self.divisiones_bloqueadas.add(llave_key)
+                else:
+                    self.llaves_generadas[llave_key] = self.generar_pareo_optimo(atletas)
+                    
+                # Construir el grid lógico (necesario para el reporte y cartelera)
+                llave_array = self.llaves_generadas[llave_key]
+                potencia_grid = len(llave_array)
+                rondas_totales = int(math.log2(potencia_grid)) if potencia_grid > 1 else 0
+                grid = [list(llave_array)] 
+
+                for r in range(rondas_totales):
+                    next_r = []
+                    for k in range(len(grid[r]) // 2):
+                        left, right = grid[r][2*k], grid[r][2*k+1]
+                        if left not in (None, "SKIP") and right not in (None, "SKIP"):
+                            match_id = f"R{r+1}_M{k}"
+                            ganador = self.resultados_combates.get(llave_key, {}).get(match_id)
+                            # --- CORRECCIÓN AQUÍ: Se añade "ronda": r + 1 ---
+                            next_r.append({
+                                "tipo": "combate", 
+                                "ronda": r + 1, 
+                                "match_id": match_id, 
+                                "ganador": ganador, 
+                                "peleador_rojo": left, 
+                                "peleador_azul": right
+                            })
+                        else:
+                            next_r.append(left if left not in (None, "SKIP") else right if right not in (None, "SKIP") else None)
+                    grid.append(next_r)
+                self.grids_generados[llave_key] = grid
+
+    def verificar_estado_torneo(self):
+        """Mantiene el botón en Rojo hasta que el usuario cierre el torneo manualmente."""
+        # Si ya se cerró y se guardó en la BD, se queda en modo Exportar (Verde)
+        if getattr(self, "torneo_cerrado_en_db", False):
+            self.btn_cerrar_torneo.config(text="📄 EXPORTAR REPORTE PDF", bg="#28a745", command=self.generar_reporte_pdf)
+            return
+
+        # Si no se ha cerrado en BD, siempre mostramos el botón de Cierre (Rojo)
+        # pero podemos habilitar/deshabilitar visualmente según si faltan peleas
+        total_divs = sum(len(p) for p in self.datos.values())
+        bloqueadas = len(self.divisiones_bloqueadas)
+        
+        pendientes = 0
+        for llave in self.divisiones_bloqueadas:
+            for r in self.grids_generados.get(llave, []):
+                for n in r:
+                    if isinstance(n, dict) and n.get("tipo") == "combate" and n.get("ganador") is None:
+                        if self.obtener_peleador_real(n["peleador_rojo"]) and self.obtener_peleador_real(n["peleador_azul"]):
+                            pendientes += 1
+
+        self.btn_cerrar_torneo.config(text="🏆 CERRAR TORNEO Y GENERAR REPORTE", bg="#ff4d4d", command=self.cerrar_torneo)
+
+    # ================= SISTEMA DE CARTELERA (ORDEN DE COMBATES) =================
+    def construir_interfaz_cartelera(self):
+        lbl = ttk.Label(self.tab_cartelera, text="Orden de Combates Sugerido (Por Fases)", font=("Helvetica", 12, "bold"))
+        lbl.pack(pady=(0, 5))
+
+        frame_controles = ttk.Frame(self.tab_cartelera)
+        frame_controles.pack(fill="x", pady=5)
+        
+        ttk.Label(frame_controles, text="Modo de Ordenamiento:").pack(side="left", padx=5)
+        self.combo_orden_cartelera = ComboBuscador(frame_controles, values=[
+            "Por Rounds (Mezclando estilos por fase y peso)", 
+            "Prioridad Femenina (Terminar estilo femenino primero)"
+        ], state="readonly", width=50)
+        self.combo_orden_cartelera.set("Por Rounds (Mezclando estilos por fase y peso)")
+        self.combo_orden_cartelera.pack(side="left", padx=5)
+        
+        # Al cambiar la opción, se re-calcula la tabla al instante
+        self.combo_orden_cartelera.bind("<<ComboboxSelected>>", lambda e: self.actualizar_cartelera())
+
+        columnas = ("ronda", "estilo", "peso", "rojo", "azul")
+        self.tree_cartelera = ttk.Treeview(self.tab_cartelera, columns=columnas, show="headings", height=20)
+        
+        self.tree_cartelera.heading("ronda", text="Ronda")
+        self.tree_cartelera.heading("estilo", text="Estilo")
+        self.tree_cartelera.heading("peso", text="División")
+        self.tree_cartelera.heading("rojo", text="Esquina Roja")
+        self.tree_cartelera.heading("azul", text="Esquina Azul")
+        
+        self.tree_cartelera.column("ronda", width=80, anchor="center")
+        self.tree_cartelera.column("estilo", width=120, anchor="center")
+        self.tree_cartelera.column("peso", width=100, anchor="center")
+        self.tree_cartelera.column("rojo", width=250)
+        self.tree_cartelera.column("azul", width=250)
+        
+        self.tree_cartelera.pack(fill="both", expand=True)
+        
+        # Evento de doble clic para iniciar pelea
+        self.tree_cartelera.bind("<Double-1>", self.iniciar_pelea_desde_cartelera)
+
+        ttk.Label(self.tab_cartelera, text="* Haz doble clic en un combate para abrir el marcador oficial e iniciarlo.", font=("Helvetica", 9, "italic")).pack(pady=10)
+
+        # --- NUEVO: BOTÓN DE CIERRE DE TORNEO ---
+        self.btn_cerrar_torneo = tk.Button(self.tab_cartelera, text="🏆 CERRAR TORNEO Y GENERAR REPORTE", font=("Helvetica", 12, "bold"), bg="#ff4d4d", fg="white", command=self.cerrar_torneo)
+        self.btn_cerrar_torneo.pack(pady=15, ipadx=15, ipady=8)
+
+    def al_cambiar_pestana(self, event):
+        # Si el usuario selecciona la pestaña de Cartelera (índice 0), la actualizamos
+        if self.notebook.index(self.notebook.select()) == 0:
+            self.actualizar_cartelera()
+
+    def actualizar_cartelera(self):
+        # Limpiar tabla
+        for item in self.tree_cartelera.get_children():
+            self.tree_cartelera.delete(item)
+            
+        combates_pendientes = []
+        
+        # 1. Recopilar todos los combates pendientes listos para pelear
+        for llave_key in self.divisiones_bloqueadas:
+            grid = self.grids_generados.get(llave_key, [])
+            estilo, peso_str = llave_key.split("-")
+            
+            # Limpiar el peso para poder ordenarlo numéricamente (ej: "57 kg" -> 57)
+            peso_int = int(peso_str.replace(" kg", "").strip())
+            
+            # Dar prioridad 0 a Femenina, y 1 al resto (para que Femenina vaya primero)
+            prio_estilo = 0 if "Femenina" in estilo else 1
+
+            for r in range(len(grid)):
+                for node in grid[r]:
+                    if isinstance(node, dict) and node.get("tipo") == "combate":
+                        if node.get("ganador") is None: # Si no tiene ganador
+                            p_rojo = self.obtener_peleador_real(node["peleador_rojo"])
+                            p_azul = self.obtener_peleador_real(node["peleador_azul"])
+                            
+                            # Ambos contrincantes deben estar definidos
+                            if p_rojo and p_azul:
+                                combates_pendientes.append({
+                                    "ronda": node["ronda"],
+                                    "prio_estilo": prio_estilo,
+                                    "estilo": estilo,
+                                    "peso_int": peso_int,
+                                    "peso_str": peso_str,
+                                    "id_rojo": p_rojo['id'],
+                                    "nom_rojo": p_rojo['nombre'],
+                                    "id_azul": p_azul['id'],
+                                    "nom_azul": p_azul['nombre'],
+                                    "nodo_combate": node,
+                                    "llave_key": llave_key
+                                })
+        
+        # 2. Ordenamiento Dinámico según la selección del usuario
+        modo_seleccionado = getattr(self, "combo_orden_cartelera", None)
+        
+        if modo_seleccionado and "Prioridad Femenina" in modo_seleccionado.get():
+            # MODO 2: Primero todo Femenino (respetando sus rondas y pesos), 
+            # luego Libre y Greco mezclados (respetando sus rondas y pesos).
+            combates_pendientes.sort(key=lambda x: (x["prio_estilo"], x["ronda"], x["peso_int"]))
+        else:
+            # MODO 1: Prioridad absoluta a la Ronda. 
+            # Mezcla Libre, Greco y Femenino en la misma fase, ordenados estrictamente por peso.
+            combates_pendientes.sort(key=lambda x: (x["ronda"], x["peso_int"], x["prio_estilo"]))
+        
+        # 3. Algoritmo de Separación (Descanso para los atletas)
+        cartelera_final = []
+        registro_descanso = {} # Guarda el índice en la cartelera del último combate de cada atleta
+        
+        # Separación mínima deseada (ej: intentar que haya al menos 3 peleas de por medio)
+        separacion_ideal = 3 
+
+        while combates_pendientes:
+            mejor_idx = 0 # Por defecto, tomamos el primero en la lista (que respeta el orden ideal)
+            
+            for i, c in enumerate(combates_pendientes):
+                # Calcular cuántas peleas han pasado desde la última vez que peleó cada uno
+                distancia_r = len(cartelera_final) - registro_descanso.get(c["id_rojo"], -999)
+                distancia_a = len(cartelera_final) - registro_descanso.get(c["id_azul"], -999)
+                
+                # Si ambos atletas han descansado lo suficiente, este es el combate ideal
+                if distancia_r >= separacion_ideal and distancia_a >= separacion_ideal:
+                    mejor_idx = i
+                    break 
+            
+            # Sacamos el combate seleccionado de los pendientes y lo metemos a la final
+            elegido = combates_pendientes.pop(mejor_idx)
+            cartelera_final.append(elegido)
+            
+            # Actualizamos cuándo fue la última vez que pelearon
+            indice_actual = len(cartelera_final) - 1
+            registro_descanso[elegido["id_rojo"]] = indice_actual
+            registro_descanso[elegido["id_azul"]] = indice_actual
+
+        # 4. Insertar la cartelera ya optimizada en la tabla visual
+        for idx, c in enumerate(cartelera_final):
+            self.tree_cartelera.insert("", "end", iid=str(idx), values=(
+                f"Ronda {c['ronda']}", c['estilo'], c['peso_str'], c['nom_rojo'], c['nom_azul']
+            ), tags=(c['llave_key'], str(c['nodo_combate'])))
+            
+            # Almacenar datos para el doble clic
+            self.tree_cartelera.item(str(idx), text=c['llave_key'])
+            setattr(self.tree_cartelera, f"nodo_{idx}", c['nodo_combate'])
+
+    def iniciar_pelea_desde_cartelera(self, event):
+        # 1. --- VALIDACIÓN DE SEGURIDAD MEJORADA ---
+        total_divisiones = sum(len(pesos) for pesos in self.datos.values())
+        if len(self.divisiones_bloqueadas) < total_divisiones:
+            faltantes = total_divisiones - len(self.divisiones_bloqueadas)
+            return messagebox.showwarning("Llaves Pendientes", 
+                f"No se puede iniciar la competencia.\n\nAún faltan {faltantes} categorías de peso por confirmar y bloquear.")
+
+        item_id = self.tree_cartelera.focus()
+        if not item_id: return
+        
+        llave_key = self.tree_cartelera.item(item_id, "text")
+        match_node = getattr(self.tree_cartelera, f"nodo_{item_id}", None)
+        
+        if match_node:
+            # Separar Estilo y Peso (ej: "Estilo Libre-60 kg")
+            estilo, peso = llave_key.split("-")
+            tab_estilo = None
+            
+            # 2. Buscar el TAB que corresponde al ESTILO únicamente
+            for tab in self.notebook.winfo_children():
+                if getattr(tab, "estilo", "") == estilo:
+                    tab_estilo = tab
+                    break
+            
+            if tab_estilo:
+                # 3. --- CORRECCIÓN CRÍTICA ---
+                # Forzamos al combobox de ese estilo a ponerse en el peso de la pelea
+                tab_estilo.cmb_peso.set(peso)
+                
+                # Sincronizamos la memoria interna del tab con el nuevo peso
+                self.procesar_y_dibujar(tab_estilo)
+                
+                # Ahora sí, iniciamos la pelea con el contexto correcto
+                self.iniciar_pelea(match_node, tab_estilo, llave_key)
 
     def construir_tab_estilo(self, tab, estilo, pesos_dict):
         top_frame = ttk.Frame(tab)
         top_frame.pack(fill="x", pady=5)
 
+        btn_img = ttk.Button(top_frame, text="📸 Exportar Imagen", 
+                             command=lambda t=tab: self.exportar_imagen_llave(t))
+        btn_img.pack(side="right", padx=10)
+
         ttk.Label(top_frame, text="División de Peso:").pack(side="left", padx=5)
         
         lista_pesos = list(pesos_dict.keys())
-        cmb_peso = ttk.Combobox(top_frame, values=lista_pesos, state="readonly", width=15)
+        cmb_peso = ComboBuscador(top_frame, values=lista_pesos, state="readonly", width=15)
         cmb_peso.pack(side="left", padx=5)
         cmb_peso.set(lista_pesos[0]) # Seleccionar el primero por defecto
 
-        btn_confirmar = ttk.Button(top_frame, text="Confirmar y Bloquear Llave", command=lambda: self.bloquear_llave(estilo, cmb_peso.get()))
-        btn_confirmar.pack(side="right", padx=20)
+        # Guardamos la referencia en el tab para poder ocultarlo después
+        tab.btn_confirmar = ttk.Button(top_frame, text="Confirmar y Bloquear Llave", command=lambda: self.bloquear_llave(estilo, cmb_peso.get()))
+        tab.btn_confirmar.pack(side="right", padx=20)
 
         # Lienzo (Canvas)
         canvas_frame = ttk.Frame(tab)
@@ -119,28 +526,15 @@ class PantallaPareo(ttk.Frame):
         peso = tab.cmb_peso.get()
         llave_key = f"{estilo}-{peso}"
 
-        if llave_key not in self.llaves_generadas:
-            atletas = self.datos[estilo][peso]
-            
-            # Calcular el tamaño del torneo
-            n = len(atletas)
-            potencia = 2 ** math.ceil(math.log2(n)) if n > 1 else 1
-            
-            # --- MAGIA DE BASE DE DATOS: Intentar cargar la llave si ya fue bloqueada ---
-            llave_guardada = self.db.cargar_llave_bloqueada(self.id_torneo, estilo, peso, potencia)
-            
-            if llave_guardada:
-                # 1. Ya se bloqueó en el pasado. Se carga idéntica.
-                self.llaves_generadas[llave_key] = llave_guardada
-                self.modo_edicion = False
-                if hasattr(tab, 'btn_confirmar'):
-                    tab.btn_confirmar.pack_forget() # Ocultar botón permanentemente
-            else:
-                # 2. Es nueva. Se usa el algoritmo matemático.
-                self.llaves_generadas[llave_key] = self.generar_pareo_optimo(atletas)
-                self.modo_edicion = True
-                if hasattr(tab, 'btn_confirmar'):
-                    tab.btn_confirmar.pack(side="right", padx=20) # Mostrar el botón
+        # Ahora determinamos el modo de edición basándonos en si la memoria lo marcó como bloqueado
+        if llave_key in self.divisiones_bloqueadas:
+            self.modo_edicion = False
+            if hasattr(tab, 'btn_confirmar'):
+                tab.btn_confirmar.pack_forget() 
+        else:
+            self.modo_edicion = True
+            if hasattr(tab, 'btn_confirmar'):
+                tab.btn_confirmar.pack(side="right", padx=20) 
 
         self.dibujar_llave(tab.canvas, self.llaves_generadas[llave_key], llave_key)
         
@@ -250,6 +644,8 @@ class PantallaPareo(ttk.Frame):
                     next_r.append(None)
             grid.append(next_r)
 
+        self.grids_generados[llave_key] = grid
+
         # Dibujar Cajas
         for r in range(rondas_totales + 1):
             for k in range(len(grid[r])):
@@ -297,7 +693,13 @@ class PantallaPareo(ttk.Frame):
                     color_borde = "yellow" if self.caja_seleccionada == idx else "white"
                     color_fondo = "#4a4a4a" if self.caja_seleccionada == idx else "#1e1e1e"
 
+                    # --- Dentro del bucle de "Dibujar Cajas" -> Lógica de Atletas ---
                     canvas.create_rectangle(x, box_y1, x + box_w, box_y2, outline=color_borde, fill=color_fondo)
+
+                    # NUEVO: Indicador de esquina (Rojo para el superior del par, Azul para el inferior)
+                    color_esquina = "#ff4d4d" if k % 2 == 0 else "#4d4dff"
+                    canvas.create_rectangle(x, box_y1, x + 5, box_y2, fill=color_esquina, outline="") 
+
                     canvas.create_text(x + 10, y, text=node['nombre'], fill="white", anchor="w", font=("Helvetica", 9))
 
                     if self.modo_edicion:
@@ -323,14 +725,21 @@ class PantallaPareo(ttk.Frame):
                     right_x = left_x
                     right_y = y_pos[r][2*k+1]
 
+                    # --- Dentro del bucle de "Dibujar Horquillas" ---
                     mid_x = left_x + x_pad / 2
 
-                    canvas.create_line(left_x, left_y, mid_x, left_y, fill="white")
-                    canvas.create_line(right_x, right_y, mid_x, right_y, fill="white")
-                    canvas.create_line(mid_x, left_y, mid_x, right_y, fill="white")
-                    canvas.create_line(mid_x, next_y, next_x, next_y, fill="white")
+                    # Línea superior (Esquina Roja) con grosor aumentado para visibilidad
+                    canvas.create_line(left_x, left_y, mid_x, left_y, fill="#ff4d4d", width=2)
+                    canvas.create_line(mid_x, left_y, mid_x, next_y, fill="#ff4d4d", width=2)
 
-        canvas.config(scrollregion=canvas.bbox("all"))
+                    # Línea inferior (Esquina Azul)
+                    canvas.create_line(right_x, right_y, mid_x, right_y, fill="#4d4dff", width=2)
+                    canvas.create_line(mid_x, right_y, mid_x, next_y, fill="#4d4dff", width=2)
+
+                    # Línea de salida hacia la siguiente ronda
+                    canvas.create_line(mid_x, next_y, next_x, next_y, fill="white", width=2)
+
+                    canvas.config(scrollregion=canvas.bbox("all"))
 
     # ================= EVENTOS DE INTERACCIÓN =================
     def on_canvas_click(self, event, tab):
@@ -421,7 +830,14 @@ class PantallaPareo(ttk.Frame):
             ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
             ttk.Button(btn_frame, text="📄 PDF", command=lambda: self.exportar_pdf(match_node, tab)).pack(side="left", padx=5)
         elif p_rojo is not None and p_azul is not None:
-            ttk.Button(btn_frame, text="Iniciar Pelea", command=lambda: self.iniciar_pelea(match_node, tab, llave_key)).pack()
+            # --- NUEVA REGLA: Validar cierre de todas las llaves ---
+            total_divisiones = sum(len(pesos) for pesos in self.datos.values())
+            if len(self.divisiones_bloqueadas) >= total_divisiones:
+                ttk.Button(btn_frame, text="Iniciar Pelea", command=lambda: self.iniciar_pelea(match_node, tab, llave_key)).pack()
+            else:
+                lbl_aviso = ttk.Label(btn_frame, text="Bloquee todas las llaves de peso\npara iniciar la competencia", 
+                                      foreground="#f39c12", font=("Helvetica", 9, "bold"), justify="center")
+                lbl_aviso.pack()
         else:
             ttk.Label(btn_frame, text="Esperando clasificado...", font=("Helvetica", 9, "italic")).pack()
 
@@ -638,11 +1054,14 @@ class PantallaPareo(ttk.Frame):
 
     def iniciar_pelea(self, match_node, tab, llave_key):
         from ventana_combate import VentanaCombate 
-        self.panel_combate.destroy() 
+        
+        # Validar si el panel flotante existe antes de destruirlo
+        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
+            self.panel_combate.destroy() 
+            
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         
-        # El callback ahora acepta los árbitros, el historial de puntos y los totales
         VentanaCombate(self, match_node, p_rojo, p_azul, lambda m_id, gan, mot, arb, jue, jef, hist, tot: self.asignar_ganador(match_node, gan, mot, tab, llave_key, arb, jue, jef, hist, tot))
 
     def editar_pelea(self, match_node, tab, llave_key): 
@@ -677,29 +1096,36 @@ class PantallaPareo(ttk.Frame):
         # Recargamos la memoria de victorias para traer los ID's de los árbitros y mostrarlos en edición
         self.resultados_combates = self.db.cargar_resultados_combates(self.id_torneo)
         self.procesar_y_dibujar(tab)
+        self.actualizar_cartelera()
+        self.verificar_estado_torneo()
 
-    def bloquear_llave(self, estilo, peso):
+    def bloquear_llave(self, estilo, peso, mostrar_msg=True): # <-- Añadir mostrar_msg
         llave_key = f"{estilo}-{peso}"
         array_actual = self.llaves_generadas[llave_key]
         
-        respuesta = messagebox.askyesno("Confirmar", f"¿Está seguro de bloquear y confirmar la llave de {estilo} - {peso}? Ya no podrá intercambiar atletas manualmente.")
+        # Solo preguntamos si no es una confirmación masiva
+        respuesta = True
+        if mostrar_msg:
+            respuesta = messagebox.askyesno("Confirmar", f"¿Está seguro de bloquear y confirmar la llave de {estilo} - {peso}? Ya no podrá intercambiar atletas manualmente.")
+            
         if respuesta:
-            # --- GUARDAR EN LA BASE DE DATOS AL BLOQUEAR ---
             exito = self.db.bloquear_y_guardar_llave(self.id_torneo, estilo, peso, array_actual)
             
             if exito:
+                self.divisiones_bloqueadas.add(llave_key)
                 self.modo_edicion = False
                 self.caja_seleccionada = None
-                
-                # Actualizar la pestaña actual
+            
                 for tab in self.notebook.winfo_children():
-                    if getattr(tab, "estilo", "") == estilo and tab.cmb_peso.get() == peso:
-                        if hasattr(tab, 'btn_confirmar'):
-                            tab.btn_confirmar.pack_forget()
+                    if getattr(tab, "estilo", "") == estilo:
                         self.procesar_y_dibujar(tab)
-                messagebox.showinfo("Bloqueado", "Llave confirmada y asegurada en la Base de Datos.")
+            
+                if mostrar_msg:
+                    messagebox.showinfo("Bloqueado", "Llave confirmada y asegurada.")
+                self.verificar_estado_torneo()
             else:
-                messagebox.showerror("Error", "Ocurrió un error al intentar guardar la llave en PostgreSQL.")
+                if mostrar_msg:
+                    messagebox.showerror("Error", "Error al guardar en la base de datos.")
 
     # ================= MÉTODOS PARA EL TOOLTIP =================
     def on_canvas_motion(self, event, tab):
@@ -766,3 +1192,265 @@ class PantallaPareo(ttk.Frame):
             return nodo.get("ganador") 
         # Si no es combate, es el diccionario del atleta directamente
         return nodo
+
+    # ================= CIERRE DE TORNEO Y REPORTES =================
+    def cerrar_torneo(self):
+        # 1. Validar que no hayan combates pendientes en la cartelera
+        if len(self.tree_cartelera.get_children()) > 0:
+            messagebox.showwarning("Torneo Incompleto", "Aún hay combates pendientes en la cartelera.\n\nTermine todos los combates programados antes de cerrar el torneo.")
+            return
+        
+        # 2. Validar que todas las divisiones hayan sido bloqueadas
+        total_divisiones = sum(len(pesos) for pesos in self.datos.values())
+        if len(self.divisiones_bloqueadas) < total_divisiones:
+            messagebox.showwarning("Torneo Incompleto", "Existen divisiones de peso que no han sido confirmadas ni bloqueadas.\n\nRevise las pestañas de estilos y asegúrese de generar todas las llaves.")
+            return
+
+        # 3. Confirmación de seguridad
+        respuesta = messagebox.askyesno("Confirmar Cierre", "¿Está seguro de proceder?")
+        if respuesta:
+            exito = self.db.finalizar_torneo(self.id_torneo)
+            if exito:
+                self.torneo_cerrado_en_db = True # <-- CRÍTICO: Marcamos el estado
+                messagebox.showinfo("Torneo Finalizado", "¡El torneo ha sido cerrado exitosamente!")
+                self.verificar_estado_torneo() # Esto cambiará el botón a verde (Exportar)
+            else:
+                messagebox.showerror("Error", "No se pudo cerrar el torneo.")
+
+    def generar_reporte_pdf(self):
+        try:
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import letter, landscape
+            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch
+            from tkinter import filedialog, messagebox
+        except ImportError:
+            messagebox.showerror("Error", "Falta la librería ReportLab. Ejecuta: pip install reportlab")
+            return
+
+        ruta_guardado = filedialog.asksaveasfilename(
+            defaultextension=".pdf", 
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=f"Reporte_Final_Resultados_{self.id_torneo}.pdf"
+        )
+        if not ruta_guardado: return
+
+        # Configuración de página horizontal (landscape)
+        doc = SimpleDocTemplate(ruta_guardado, pagesize=landscape(letter),
+                                rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+        elementos = []
+        estilos = getSampleStyleSheet()
+
+        # --- ESTILOS DE TEXTO PERSONALIZADOS ---
+        estilo_titulo = ParagraphStyle('Titulo', parent=estilos['Heading1'], alignment=1, fontSize=18, spaceAfter=20, textColor=colors.HexColor("#1e3d59"))
+        estilo_estilo_label = ParagraphStyle('EstiloHeader', parent=estilos['Heading2'], alignment=1, fontSize=14, spaceBefore=20, spaceAfter=5, textColor=colors.black, backgroundColor=colors.HexColor("#fdfd96"), borderPadding=8)
+
+        conexion = self.db.conectar()
+        if not conexion: return
+        try:
+            with conexion.cursor() as cur:
+                # 1. Obtener datos básicos del torneo incluyendo Ciudad
+                cur.execute("""
+                    SELECT t.nombre, t.lugar_exacto, ciu.nombre as ciudad,
+                           to_char(t.fecha_inicio, 'DD/MM/YYYY'), 
+                           to_char(t.fecha_fin, 'DD/MM/YYYY HH12:MI AM') 
+                    FROM torneo t
+                    LEFT JOIN ciudad ciu ON t.id_ciudad = ciu.id
+                    WHERE t.id = %s
+                """, (self.id_torneo,))
+                torneo = cur.fetchone()
+            
+            # 2. Obtener TODAS las inscripciones PRIMERO (Corrección del error)
+            inscripciones = self.db.obtener_datos_reporte(self.id_torneo)
+
+            # --- PROCESAMIENTO DE ESTADÍSTICAS GENERALES ---
+            total_atletas = len(inscripciones)
+            clubes_list = set(ins['club'] for ins in inscripciones if ins['club'] and ins['club'] != "Sin Club")
+            colegios_list = set(ins['colegio'] for ins in inscripciones if ins['colegio'] and ins['colegio'] != "N/A")
+            departamentos_list = set(ins['departamento'] for ins in inscripciones if ins['departamento'] and ins['departamento'] != "N/A")
+            
+            # --- SECCIÓN DE DATOS GENERALES (Encabezado del Informe) ---
+            elementos.append(Paragraph(f"<b>REPORTE OFICIAL DE RESULTADOS</b>", estilo_titulo))
+            
+            sede_completa = f"{torneo[1]}, {torneo[2]}" if torneo[2] else torneo[1]
+
+            fecha_fin_texto = torneo[4] if torneo[4] else "En curso / Pendiente"
+                
+            info_basica_data = [
+                [Paragraph(f"<b>Evento:</b> {torneo[0]}", estilos['Normal']), Paragraph(f"<b>Atletas Inscritos:</b> {total_atletas}", estilos['Normal'])],
+                [Paragraph(f"<b>Sede:</b> {sede_completa}", estilos['Normal']), Paragraph(f"<b>Clubes:</b> {len(clubes_list)}", estilos['Normal'])],
+                [Paragraph(f"<b>Fechas:</b> {torneo[3]} al {fecha_fin_texto}", estilos['Normal']), Paragraph(f"<b>Colegios:</b> {len(colegios_list)}", estilos['Normal'])]
+            ]
+            
+            info_table = Table(info_basica_data, colWidths=[6*inch, 2.5*inch])
+            info_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('LINEBELOW', (0,0), (-1,-1), 0.5, colors.lightgrey)
+            ]))
+            elementos.append(info_table)
+            elementos.append(Spacer(1, 0.15 * inch))
+
+            deps_texto = ", ".join(sorted(departamentos_list)) if departamentos_list else "Ninguno"
+            elementos.append(Paragraph(f"<b>Departamentos participantes:</b> {deps_texto}", estilos['Normal']))
+            elementos.append(Spacer(1, 0.25 * inch))
+
+            # 3. CÁLCULO DE POSICIONES (ORO, PLATA, BRONCE)
+            posiciones = {}
+            for llave_key, grid in self.grids_generados.items():
+                rondas_validas = [r for r in grid if any(isinstance(n, dict) and n.get("tipo")=="combate" for n in r)]
+                if rondas_validas:
+                    # Final: Oro y Plata
+                    final = rondas_validas[-1]
+                    for n in final:
+                        if isinstance(n, dict) and n.get("ganador"):
+                            p_gan = self.obtener_peleador_real(n["ganador"])
+                            p_rojo = self.obtener_peleador_real(n["peleador_rojo"])
+                            p_azul = self.obtener_peleador_real(n["peleador_azul"])
+                            if p_gan and p_rojo and p_azul:
+                                posiciones[p_gan['id']] = "1ro (Oro)"
+                                id_perd = p_azul['id'] if p_gan['id'] == p_rojo['id'] else p_rojo['id']
+                                posiciones[id_perd] = "2do (Plata)"
+                    # Semifinales: Bronces
+                    if len(rondas_validas) >= 2:
+                        semis = rondas_validas[-2]
+                        for n in semis:
+                            if isinstance(n, dict) and n.get("ganador"):
+                                p_gan = self.obtener_peleador_real(n["ganador"])
+                                p_rojo = self.obtener_peleador_real(n["peleador_rojo"])
+                                p_azul = self.obtener_peleador_real(n["peleador_azul"])
+                                if p_gan and p_rojo and p_azul:
+                                    id_perd = p_azul['id'] if p_gan['id'] == p_rojo['id'] else p_rojo['id']
+                                    posiciones[id_perd] = "3ro (Bronce)"
+
+            # 4. AGRUPACIÓN JERÁRQUICA: ESTILO -> PESO
+            datos_organizados = {}
+            for ins in inscripciones:
+                est = ins['estilo'].upper()
+                peso_txt = f"{ins['peso_cat']} kg"
+                if est not in datos_organizados: datos_organizados[est] = {}
+                if peso_txt not in datos_organizados[est]: datos_organizados[est][peso_txt] = []
+                
+                pos = posiciones.get(ins['id_peleador'], "--")
+                datos_organizados[est][peso_txt].append([
+                    pos, f"{ins['apellidos']}, {ins['nombre']}", peso_txt,
+                    ins['club'] or "Sin Club", ins['colegio'] or "N/A", ins['departamento'] or "N/A",
+                    str(int(ins['anio_nac'])) if ins['anio_nac'] else "N/A"
+                ])
+
+            # 5. GENERACIÓN DE TABLAS POR ESTILO CON SEPARADORES DE PESO
+            for est_nom in sorted(datos_organizados.keys()):
+                elementos.append(Paragraph(f"<b>RESULTADOS {est_nom}</b>", estilo_estilo_label))
+                
+                header = [["POS", "ATLETA", "PESO", "CLUB", "COLEGIO", "DEPARTAMENTO", "AÑO NAC."]]
+                cuerpo_tabla = []
+                indices_separadores = []
+                
+                pesos_ordenados = sorted(datos_organizados[est_nom].keys(), key=lambda x: int(x.split()[0]))
+                
+                for peso_nom in pesos_ordenados:
+                    indices_separadores.append(len(header) + len(cuerpo_tabla))
+                    cuerpo_tabla.append([f"CATEGORÍA DE PESO {peso_nom}", "", "", "", "", "", ""])
+                    
+                    filas_atletas = datos_organizados[est_nom][peso_nom]
+                    filas_atletas.sort(key=lambda x: (1 if "1ro" in x[0] else 2 if "2do" in x[0] else 3 if "3ro" in x[0] else 4, x[1]))
+                    cuerpo_tabla.extend(filas_atletas)
+                
+                data_final = header + cuerpo_tabla
+                
+                t = Table(data_final, colWidths=[0.9*inch, 2.0*inch, 0.7*inch, 1.5*inch, 2.5*inch, 1.3*inch, 0.7*inch])
+                
+                estilo_t = TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#2c3e50")), 
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'), # Encabezados centrados
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    
+                    # --- ALINEACIÓN ESPECÍFICA DE COLUMNAS ---
+                    ('ALIGN', (0, 1), (0, -1), 'CENTER'), # Columna 0: POS
+                    ('ALIGN', (1, 1), (1, -1), 'LEFT'),   # Columna 1: ATLETA
+                    ('ALIGN', (2, 1), (2, -1), 'CENTER'), # Columna 2: PESO
+                    ('ALIGN', (3, 1), (5, -1), 'LEFT'),   # Columnas 3,4,5: CLUB, COLEGIO, DEP
+                    ('ALIGN', (6, 1), (6, -1), 'CENTER'), # Columna 6: AÑO NAC.
+                ])
+                
+                for idx in indices_separadores:
+                    estilo_t.add('SPAN', (0, idx), (6, idx)) 
+                    estilo_t.add('BACKGROUND', (0, idx), (6, idx), colors.HexColor("#fff9c4")) 
+                    estilo_t.add('ALIGN', (0, idx), (6, idx), 'CENTER')
+                    estilo_t.add('FONTNAME', (0, idx), (6, idx), 'Helvetica-Bold')
+                    estilo_t.add('FONTSIZE', (0, idx), (6, idx), 10)
+
+                for i in range(1, len(data_final)):
+                    if i not in indices_separadores:
+                        if i % 2 == 0:
+                            estilo_t.add('BACKGROUND', (0, i), (-1, i), colors.HexColor("#f8f9fa"))
+
+                t.setStyle(estilo_t)
+                elementos.append(t)
+                elementos.append(Spacer(1, 0.3 * inch))
+
+            # --- NUEVO: LISTA DE OFICIALES PARTICIPANTES AL FINAL DEL REPORTE ---
+            elementos.append(Spacer(1, 0.4 * inch))
+            
+            # Extraer la lista consolidada desde la BD
+            oficiales_participantes = self.db.obtener_oficiales_reporte(self.id_torneo)
+            
+            if oficiales_participantes:
+                # Título de la sección
+                estilo_oficiales_tit = ParagraphStyle('OficialesTit', parent=estilos['Heading3'], alignment=1, fontSize=12, textColor=colors.HexColor("#2c3e50"), fontName='Helvetica-Bold', spaceAfter=10)
+                elementos.append(Paragraph("OFICIALES DE ARBITRAJE PARTICIPANTES", estilo_oficiales_tit))
+                
+                # Construcción de la tabla con la información completa
+                datos_oficiales = [["NOMBRE Y APELLIDOS", "CÉDULA", "CORREO", "CELULAR", "ROLES DESEMPEÑADOS"]]
+                for ofi in oficiales_participantes:
+                    nombre_completo = f"{ofi['apellidos']}, {ofi['nombre']}"
+                    correo = ofi['correo'] if ofi['correo'] else "N/A"
+                    celular = ofi['celular'] if ofi['celular'] else "N/A"
+                    
+                    datos_oficiales.append([
+                        nombre_completo, 
+                        ofi['cedula'], 
+                        correo, 
+                        celular, 
+                        ofi['roles_desempenados']
+                    ])
+                
+                # Calibración de columnas para ancho total de ~10 pulgadas
+                tabla_oficiales = Table(datos_oficiales, colWidths=[2.2*inch, 1.5*inch, 2.3*inch, 1.2*inch, 2.8*inch])
+                tabla_oficiales.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#e5e8e8")), # Gris claro para encabezado
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'), # Encabezados centrados
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    
+                    # --- ALINEACIÓN ESPECÍFICA DE DATOS ---
+                    ('ALIGN', (0, 1), (-1, -1), 'CENTER'), # Centra todas las columnas por defecto
+                    
+                    ('ALIGN', (0, 1), (0, -1), 'LEFT'),    # Alinea a la izquierda Col 0: NOMBRES
+                    ('LEFTPADDING', (0, 1), (0, -1), 10),  # Margen izquierdo para que no toque la línea
+                    
+                    ('ALIGN', (2, 1), (2, -1), 'LEFT'),    # Alinea a la izquierda Col 2: CORREO
+                    ('LEFTPADDING', (2, 1), (2, -1), 10),  # Margen izquierdo para que no toque la línea
+                ]))
+                elementos.append(tabla_oficiales)
+
+            # --- FINALIZAR Y CONSTRUIR PDF ---
+            doc.build(elementos)
+            messagebox.showinfo("Éxito", "Reporte PDF final generado y optimizado correctamente.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo generar el reporte:\n{e}")
+        finally:
+            conexion.close()

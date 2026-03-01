@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from conexion_db import ConexionDB
+from utilidades import aplicar_autocompletado
+from utilidades import ComboBuscador
 
 class VentanaEditarPelea(tk.Toplevel):
     def __init__(self, parent, match_node, p_rojo, p_azul, tab, llave_key, callback_actualizar):
@@ -14,7 +16,13 @@ class VentanaEditarPelea(tk.Toplevel):
         self.db = ConexionDB()
         
         self.title("BOLETÍN DE PUNTUACIÓN - UWW")
-        self.geometry("700x650") 
+        
+        # --- CENTRAR VENTANA ---
+        ancho, alto = 550, 500
+        x = (self.winfo_screenwidth() // 2) - (ancho // 2)
+        y = (self.winfo_screenheight() // 2) - (alto // 2)
+        self.geometry(f"{ancho}x{alto}+{x}+{y}")
+
         self.transient(parent)
         self.grab_set()
 
@@ -63,16 +71,20 @@ class VentanaEditarPelea(tk.Toplevel):
         frame_arbitros.pack(fill="x", padx=15, pady=10)
 
         ttk.Label(frame_arbitros, text="Referee / Árbitro:").grid(row=0, column=0, sticky="w", pady=5)
-        self.cmb_arbitro = ttk.Combobox(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
+        self.cmb_arbitro = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
         self.cmb_arbitro.grid(row=0, column=1, padx=10, pady=5)
 
         ttk.Label(frame_arbitros, text="Judge / Juez:").grid(row=1, column=0, sticky="w", pady=5)
-        self.cmb_juez = ttk.Combobox(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
+        self.cmb_juez = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
         self.cmb_juez.grid(row=1, column=1, padx=10, pady=5)
 
         ttk.Label(frame_arbitros, text="Mat Chairman / Jefe de Tapiz:").grid(row=2, column=0, sticky="w", pady=5)
-        self.cmb_jefe = ttk.Combobox(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
+        self.cmb_jefe = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
         self.cmb_jefe.grid(row=2, column=1, padx=10, pady=5)
+
+        aplicar_autocompletado(self.cmb_arbitro, self.nombres_oficiales)
+        aplicar_autocompletado(self.cmb_juez, self.nombres_oficiales)
+        aplicar_autocompletado(self.cmb_jefe, self.nombres_oficiales)
 
         ganador_data = self.match_node.get("ganador", {})
         def set_combo(cmb, id_oficial):
@@ -108,14 +120,17 @@ class VentanaEditarPelea(tk.Toplevel):
         ttk.Label(frame_pts_a, text=f"TOTAL: {self.total_a}", font=("Helvetica", 11, "bold"), foreground="#0000cc").pack()
 
         ttk.Label(frame_resultados, text="Ganador (Winner):", font=("Helvetica", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(15, 5))
-        self.cmb_ganador = ttk.Combobox(frame_resultados, values=[self.p_rojo['nombre'], self.p_azul['nombre']], state="readonly", width=25)
+        self.cmb_ganador = ComboBuscador(frame_resultados, values=[self.p_rojo['nombre'], self.p_azul['nombre']], state="readonly", width=25)
         self.cmb_ganador.grid(row=3, column=1, columnspan=2, sticky="w", pady=(15, 5))
         if ganador_data: self.cmb_ganador.set(ganador_data["nombre"])
 
         ttk.Label(frame_resultados, text="Tipo de Victoria:", font=("Helvetica", 10, "bold")).grid(row=4, column=0, sticky="w", pady=5)
-        self.cmb_victoria = ttk.Combobox(frame_resultados, values=self.tipos_victoria, state="readonly", width=50)
+        self.cmb_victoria = ComboBuscador(frame_resultados, values=self.tipos_victoria, state="readonly", width=50)
         self.cmb_victoria.grid(row=4, column=1, columnspan=2, sticky="w", pady=5)
         if ganador_data and "motivo_victoria" in ganador_data: self.cmb_victoria.set(ganador_data["motivo_victoria"])
+
+        aplicar_autocompletado(self.cmb_ganador, [self.p_rojo['nombre'], self.p_azul['nombre']])
+        aplicar_autocompletado(self.cmb_victoria, self.tipos_victoria)
 
         # --- BOTONES FINALES ---
         botones_frame = tk.Frame(self)

@@ -9,8 +9,14 @@ class AplicacionPrincipal(tk.Tk):
         
         # Configuración básica de la ventana
         self.title("Daedalus Wrestling - Gestión de Torneos")
-        self.geometry("950x650")
-        self.minsize(950, 650)
+        
+        # --- CENTRAR VENTANA ---
+        ancho, alto = 1050, 700
+        x = (self.winfo_screenwidth() // 2) - (ancho // 2)
+        y = (self.winfo_screenheight() // 2) - (alto // 2)
+        self.geometry(f"{ancho}x{alto}+{x}+{y}")
+
+        self.minsize(1050, 700)
 
         # Configurar el grid para que el contenedor principal se expanda
         self.grid_rowconfigure(0, weight=1)

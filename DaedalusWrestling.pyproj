@@ -25,6 +25,7 @@
     <Compile Include="DaedalusWrestling.py" />
     <Compile Include="pantalla_inscripcion.py" />
     <Compile Include="pantalla_pareo.py" />
+    <Compile Include="utilidades.py" />
     <Compile Include="ventana_combate.py" />
     <Compile Include="ventana_editar_pelea.py" />
     <Compile Include="ventana_nuevo_atleta.py" />

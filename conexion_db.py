@@ -1,3 +1,4 @@
+import math
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -26,13 +27,14 @@ class ConexionDB:
             return None
 
     def obtener_atletas(self):
-        """Devuelve todos los atletas activos con el nombre de su club y ciudad."""
+        """Devuelve todos los atletas activos con el nombre de su club, ciudad y colegio."""
         query = """
             SELECT p.id, p.nombre, p.apellidos, p.fecha_nacimiento, p.sexo, 
-                   c.nombre as club, ciu.nombre as ciudad
+                   c.nombre as club, ciu.nombre as ciudad, col.nombre as colegio
             FROM peleador p
             LEFT JOIN club c ON p.id_club = c.id
             LEFT JOIN ciudad ciu ON c.id_ciudad = ciu.id
+            LEFT JOIN colegio col ON p.id_colegio = col.id
             WHERE p.activo = TRUE
             ORDER BY p.apellidos, p.nombre;
         """
@@ -108,20 +110,20 @@ class ConexionDB:
     def insertar_club(self, id_ciudad, nombre):
         return self._ejecutar_insert("INSERT INTO club (id_ciudad, nombre) VALUES (%s, %s)", (id_ciudad, nombre))
 
-    def insertar_peleador(self, nombre, apellidos, fecha_nac, sexo, id_club, colegio):
+    def insertar_peleador(self, nombre, apellidos, fecha_nac, sexo, id_club, id_colegio):
         query = """
-            INSERT INTO peleador (nombre, apellidos, fecha_nacimiento, sexo, id_club, colegio) 
+            INSERT INTO peleador (nombre, apellidos, fecha_nacimiento, sexo, id_club, id_colegio) 
             VALUES (%s, %s, %s, %s, %s, %s)
         """
-        return self._ejecutar_insert(query, (nombre, apellidos, fecha_nac, sexo, id_club, colegio))
+        return self._ejecutar_insert(query, (nombre, apellidos, fecha_nac, sexo, id_club, id_colegio))
 
-    def actualizar_peleador(self, id_peleador, nombre, apellidos, fecha_nac, sexo, id_club, colegio):
+    def actualizar_peleador(self, id_peleador, nombre, apellidos, fecha_nac, sexo, id_club, id_colegio):
         query = """
             UPDATE peleador 
-            SET nombre = %s, apellidos = %s, fecha_nacimiento = %s, sexo = %s, id_club = %s, colegio = %s
+            SET nombre = %s, apellidos = %s, fecha_nacimiento = %s, sexo = %s, id_club = %s, id_colegio = %s
             WHERE id = %s
         """
-        return self._ejecutar_insert(query, (nombre, apellidos, fecha_nac, sexo, id_club, colegio, id_peleador))
+        return self._ejecutar_insert(query, (nombre, apellidos, fecha_nac, sexo, id_club, id_colegio, id_peleador))
 
     def obtener_pesos_oficiales(self):
         """Trae los límites de peso de la UWW para poder auto-asignar la división."""
@@ -149,9 +151,11 @@ class ConexionDB:
 
     def obtener_torneo_completo_debug(self, id_torneo):
         query_torneo = """
-            SELECT t.nombre, t.lugar_exacto as lugar, to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria
+            SELECT t.nombre, t.lugar_exacto as lugar, ciu.nombre as ciudad_nombre,
+                   to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria
             FROM torneo t
             JOIN categoria_edad c ON t.id_categoria_edad = c.id
+            LEFT JOIN ciudad ciu ON t.id_ciudad = ciu.id
             WHERE t.id = %s
         """
         query_inscripciones = """
@@ -191,11 +195,11 @@ class ConexionDB:
         if not conexion: return None
         try:
             with conexion.cursor() as cursor:
-                # 1. Crear torneo
+                # 1. Crear torneo con ID de Ciudad
                 cursor.execute("""
-                    INSERT INTO torneo (nombre, id_categoria_edad, lugar_exacto, fecha_inicio, fecha_fin) 
-                    VALUES (%s, %s, %s, %s, %s) RETURNING id
-                """, (datos_torneo['nombre'], datos_torneo['id_categoria'], datos_torneo['lugar'], datos_torneo['fecha'], datos_torneo['fecha']))
+                    INSERT INTO torneo (nombre, id_categoria_edad, lugar_exacto, id_ciudad, fecha_inicio, fecha_fin) 
+                    VALUES (%s, %s, %s, %s, %s, NULL) RETURNING id
+                """, (datos_torneo['nombre'], datos_torneo['id_categoria'], datos_torneo['lugar'], datos_torneo['id_ciudad'], datos_torneo['fecha']))
                 id_torneo = cursor.fetchone()[0]
 
                 # 2. Registrar divisiones e inscripciones
@@ -467,3 +471,95 @@ class ConexionDB:
         # AÑADIMOS 'tipo_accion' A LA CONSULTA SQL
         query = "SELECT color_esquina, periodo, valor_puntos, tipo_accion FROM puntuacion_combate WHERE id_combate = %s ORDER BY orden_anotacion;"
         return self._ejecutar_select(query, (id_combate,))
+
+    def obtener_datos_reporte(self, id_torneo):
+        """Obtiene la lista completa de inscritos con sus datos detallados para el PDF final."""
+        query = """
+            SELECT 
+                e.nombre as estilo, p_uww.peso_maximo as peso_cat,
+                pel.id as id_peleador, pel.nombre, pel.apellidos, 
+                EXTRACT(YEAR FROM pel.fecha_nacimiento) as anio_nac,
+                c.nombre as club, col.nombre as colegio,
+                ciu.nombre as ciudad, dep.nombre as departamento
+            FROM inscripcion i
+            JOIN torneo_division td ON i.id_torneo_division = td.id
+            JOIN peso_oficial_uww p_uww ON td.id_peso_oficial_uww = p_uww.id
+            JOIN estilo_lucha e ON p_uww.id_estilo_lucha = e.id
+            JOIN peleador pel ON i.id_peleador = pel.id
+            LEFT JOIN club c ON pel.id_club = c.id
+            LEFT JOIN ciudad ciu ON c.id_ciudad = ciu.id
+            LEFT JOIN departamento dep ON ciu.id_departamento = dep.id
+            LEFT JOIN colegio col ON pel.id_colegio = col.id
+            WHERE td.id_torneo = %s
+            ORDER BY e.nombre, p_uww.peso_maximo, pel.apellidos;
+        """
+        return self._ejecutar_select(query, (id_torneo,))
+
+    def finalizar_torneo(self, id_torneo):
+        """Actualiza la fecha_fin del torneo a la hora exacta en la que se cierra."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                cur.execute("""
+                    UPDATE torneo 
+                    SET fecha_fin = CURRENT_TIMESTAMP 
+                    WHERE id = %s
+                """, (id_torneo,))
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error al finalizar torneo: {e}")
+            return False
+        finally:
+            conexion.close()
+
+    def obtener_oficiales_reporte(self, id_torneo):
+        """Extrae dinámicamente los árbitros con toda su información y los roles desempeñados."""
+        query = """
+            WITH roles AS (
+                SELECT DISTINCT o.id, o.nombre, o.apellidos, o.cedula, o.correo, o.celular, 'Árbitro' as rol
+                FROM combate c
+                JOIN torneo_division td ON c.id_torneo_division = td.id
+                JOIN oficial_arbitraje o ON c.id_arbitro = o.id
+                WHERE td.id_torneo = %s
+                UNION
+                SELECT DISTINCT o.id, o.nombre, o.apellidos, o.cedula, o.correo, o.celular, 'Juez' as rol
+                FROM combate c
+                JOIN torneo_division td ON c.id_torneo_division = td.id
+                JOIN oficial_arbitraje o ON c.id_juez = o.id
+                WHERE td.id_torneo = %s
+                UNION
+                SELECT DISTINCT o.id, o.nombre, o.apellidos, o.cedula, o.correo, o.celular, 'Jefe de Tapiz' as rol
+                FROM combate c
+                JOIN torneo_division td ON c.id_torneo_division = td.id
+                JOIN oficial_arbitraje o ON c.id_jefe_tapiz = o.id
+                WHERE td.id_torneo = %s
+            )
+            SELECT nombre, apellidos, cedula, correo, celular, string_agg(rol, ', ') as roles_desempenados
+            FROM roles
+            GROUP BY id, nombre, apellidos, cedula, correo, celular
+            ORDER BY apellidos, nombre;
+        """
+        return self._ejecutar_select(query, (id_torneo, id_torneo, id_torneo))
+
+    def obtener_divisiones_bloqueadas(self, id_torneo):
+        """Devuelve un set con los IDs de peso_oficial_uww que ya tienen la llave confirmada."""
+        query = """
+            SELECT DISTINCT td.id_peso_oficial_uww 
+            FROM torneo_division td
+            JOIN inscripcion i ON i.id_torneo_division = td.id
+            WHERE td.id_torneo = %s AND i.orden_siembra IS NOT NULL
+        """
+        res = self._ejecutar_select(query, (id_torneo,))
+        return set(r['id_peso_oficial_uww'] for r in res)
+
+    def insertar_colegio(self, nombre):
+        return self._ejecutar_insert("INSERT INTO colegio (nombre) VALUES (%s)", (nombre,))
+
+    def insertar_oficial(self, nombre, apellidos, cedula, correo, celular):
+        query = """
+            INSERT INTO oficial_arbitraje (nombre, apellidos, cedula, correo, celular) 
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        return self._ejecutar_insert(query, (nombre, apellidos, cedula, correo, celular))

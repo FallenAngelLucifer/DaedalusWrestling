@@ -1,5 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+from utilidades import aplicar_autocompletado
+from utilidades import ComboBuscador
 
 class VentanaCombate(tk.Toplevel):
     def __init__(self, parent, match_node, p_rojo, p_azul, callback_ganador):
@@ -47,7 +49,13 @@ class VentanaCombate(tk.Toplevel):
         self.nombres_oficiales = [f"{o['apellidos']}, {o['nombre']}" for o in self.oficiales_db]
         
         self.title("Marcador Oficial UWW - Combate en Curso")
-        self.geometry("900x700") 
+        
+        # --- CENTRAR VENTANA ---
+        ancho, alto = 900, 700
+        x = (self.winfo_screenwidth() // 2) - (ancho // 2)
+        y = (self.winfo_screenheight() // 2) - (alto // 2)
+        self.geometry(f"{ancho}x{alto}+{x}+{y}")
+
         self.configure(bg="#121212")
         self.transient(parent)
         self.grab_set() 
@@ -69,16 +77,20 @@ class VentanaCombate(tk.Toplevel):
         frame_arbitros.pack(fill="x", pady=5)
         
         tk.Label(frame_arbitros, text="Árbitro:", bg="#1e1e1e", fg="white", font=("Helvetica", 9, "bold")).pack(side="left", padx=(20, 5))
-        self.cmb_arbitro = ttk.Combobox(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
+        self.cmb_arbitro = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
         self.cmb_arbitro.pack(side="left", padx=5)
         
         tk.Label(frame_arbitros, text="Juez:", bg="#1e1e1e", fg="white", font=("Helvetica", 9, "bold")).pack(side="left", padx=(15, 5))
-        self.cmb_juez = ttk.Combobox(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
+        self.cmb_juez = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
         self.cmb_juez.pack(side="left", padx=5)
         
         tk.Label(frame_arbitros, text="Jefe Tapiz:", bg="#1e1e1e", fg="white", font=("Helvetica", 9, "bold")).pack(side="left", padx=(15, 5))
-        self.cmb_jefe = ttk.Combobox(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
+        self.cmb_jefe = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
         self.cmb_jefe.pack(side="left", padx=5)
+
+        aplicar_autocompletado(self.cmb_arbitro, self.nombres_oficiales)
+        aplicar_autocompletado(self.cmb_juez, self.nombres_oficiales)
+        aplicar_autocompletado(self.cmb_jefe, self.nombres_oficiales)
         
         # Preseleccionar los 3 primeros de la base de datos si existen
         if self.nombres_oficiales:
@@ -160,7 +172,10 @@ class VentanaCombate(tk.Toplevel):
         self.lbl_reloj = tk.Label(center, fg="#ffcc00", bg="#121212", font=("Courier", 35, "bold"))
         self.lbl_reloj.pack(pady=(5, 10))
         
-        tk.Button(center, text="▶ INICIAR", font=("Helvetica", 12, "bold"), bg="#28a745", fg="white", width=12, command=self.iniciar_cronometro).pack(pady=5)
+        # --- CAMBIO: Guardamos la referencia para el control de fases ---
+        self.btn_iniciar = tk.Button(center, text="▶ INICIAR", font=("Helvetica", 12, "bold"), bg="#28a745", fg="white", width=12, command=self.iniciar_cronometro)
+        self.btn_iniciar.pack(pady=5)
+
         tk.Button(center, text="⏸ PAUSAR", font=("Helvetica", 12, "bold"), bg="#ffc107", fg="black", width=12, command=self.pausar_cronometro).pack(pady=5)
         tk.Button(center, text="⏱ 30s ACT", font=("Helvetica", 10, "bold"), bg="#17a2b8", fg="white", width=14).pack(pady=(20, 5))
         
@@ -209,11 +224,19 @@ class VentanaCombate(tk.Toplevel):
             self.actualizar_reloj_visual()
 
     def iniciar_cronometro(self):
-        # Si el tiempo está en 0 y le damos a Iniciar, actúa como botón de "Siguiente Fase"
-        if self.tiempo_segundos <= 0 and self.periodo_actual != 3:
+        if self.periodo_actual == 3: return # Combate finalizado
+
+        # Cambiar el texto a CONTINUAR tras el primer uso
+        self.btn_iniciar.config(text="▶ CONTINUAR")
+
+        # REGLA 1: Si el cronómetro está en cero, avanzar fase pero permanecer en pausa
+        if self.tiempo_segundos <= 0:
             self.avanzar_fase()
-        # Si tiene tiempo normal, arranca el reloj
-        elif not self.timer_corriendo and self.periodo_actual != 3:
+            # Al salir aquí, obligamos al usuario a pulsar CONTINUAR de nuevo para arrancar
+            return 
+            
+        # REGLA 2: Si hay tiempo disponible y no está corriendo, iniciar el bucle
+        if not self.timer_corriendo:
             self.timer_corriendo = True
             self.bucle_cronometro()
 
@@ -228,11 +251,8 @@ class VentanaCombate(tk.Toplevel):
             self.tiempo_segundos -= 1
             self.actualizar_reloj_visual()
             
-            # Si el reloj llega a 0 de forma natural mientras corre
             if self.tiempo_segundos <= 0:
-                self.timer_corriendo = False
-                # Espera 1 segundo para mostrar el "00:00" y salta de fase
-                self.after(1000, self.avanzar_fase)
+                self.timer_corriendo = False # El reloj se detiene y espera clic manual
             else:
                 self.timer_id = self.after(1000, self.bucle_cronometro)
 
@@ -284,7 +304,13 @@ class VentanaCombate(tk.Toplevel):
     def abrir_edicion_accion(self, accion):
         dialogo = tk.Toplevel(self)
         dialogo.title("Editar Acción")
-        dialogo.geometry("300x150")
+
+        # --- CENTRAR VENTANA ---
+        ancho, alto = 300, 150
+        x = (self.winfo_screenwidth() // 2) - (ancho // 2)
+        y = (self.winfo_screenheight() // 2) - (alto // 2)
+        dialogo.geometry(f"{ancho}x{alto}+{x}+{y}")
+
         dialogo.transient(self)
         dialogo.grab_set()
         
@@ -334,13 +360,19 @@ class VentanaCombate(tk.Toplevel):
         self.pausar_cronometro() 
         dialogo = tk.Toplevel(self)
         dialogo.title("Declarar Victoria (UWW)")
-        dialogo.geometry("400x200")
+
+        # --- CENTRAR VENTANA ---
+        ancho, alto = 400, 200
+        x = (self.winfo_screenwidth() // 2) - (ancho // 2)
+        y = (self.winfo_screenheight() // 2) - (alto // 2)
+        dialogo.geometry(f"{ancho}x{alto}+{x}+{y}")
+
         dialogo.transient(self)
         dialogo.grab_set()
         
         ttk.Label(dialogo, text=f"Ganador: {peleador['nombre']}", font=("Helvetica", 12, "bold")).pack(pady=10)
         ttk.Label(dialogo, text="Seleccione el motivo de la victoria:").pack(pady=5)
-        cmb_motivo = ttk.Combobox(dialogo, values=self.tipos_victoria, state="readonly", width=50)
+        cmb_motivo = ComboBuscador(dialogo, values=self.tipos_victoria, state="readonly", width=50)
         cmb_motivo.pack(pady=10)
         cmb_motivo.set(self.tipos_victoria[0]) 
         
