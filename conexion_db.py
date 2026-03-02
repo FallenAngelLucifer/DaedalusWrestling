@@ -76,13 +76,22 @@ class ConexionDB:
         return self._ejecutar_select(query)
 
     def obtener_clubes(self):
-        return self._ejecutar_select("SELECT id, nombre FROM club WHERE activo = TRUE ORDER BY nombre;")
+        query = """
+            SELECT c.id, c.nombre, ciu.nombre as ciudad, d.nombre as departamento 
+            FROM club c 
+            JOIN ciudad ciu ON c.id_ciudad = ciu.id 
+            JOIN departamento d ON ciu.id_departamento = d.id
+            WHERE c.activo = TRUE ORDER BY c.nombre;
+        """
+        return self._ejecutar_select(query)
 
     def obtener_colegios(self):
         return self._ejecutar_select("SELECT id, nombre FROM colegio WHERE activo = TRUE ORDER BY nombre;")
 
     def obtener_oficiales(self):
-        return self._ejecutar_select("SELECT id, nombre, apellidos FROM oficial_arbitraje WHERE activo = TRUE ORDER BY apellidos, nombre;")
+        # Ahora trae la cédula, correo y celular para poder editarlos
+        query = "SELECT id, nombre, apellidos, cedula, correo, celular FROM oficial_arbitraje WHERE activo = TRUE ORDER BY apellidos, nombre;"
+        return self._ejecutar_select(query)
 
     # --- NUEVAS FUNCIONES PARA INSERTAR DATOS ---
     def _ejecutar_insert(self, query, params):
@@ -152,7 +161,8 @@ class ConexionDB:
     def obtener_torneo_completo_debug(self, id_torneo):
         query_torneo = """
             SELECT t.nombre, t.lugar_exacto as lugar, ciu.nombre as ciudad_nombre,
-                   to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria
+                   to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria,
+                   t.fecha_fin
             FROM torneo t
             JOIN categoria_edad c ON t.id_categoria_edad = c.id
             LEFT JOIN ciudad ciu ON t.id_ciudad = ciu.id
@@ -563,3 +573,67 @@ class ConexionDB:
             VALUES (%s, %s, %s, %s, %s)
         """
         return self._ejecutar_insert(query, (nombre, apellidos, cedula, correo, celular))
+
+    def actualizar_club(self, id_club, id_ciudad, nombre):
+        return self._ejecutar_insert("UPDATE club SET id_ciudad = %s, nombre = %s WHERE id = %s", (id_ciudad, nombre, id_club))
+
+    def actualizar_colegio(self, id_colegio, nombre):
+        return self._ejecutar_insert("UPDATE colegio SET nombre = %s WHERE id = %s", (nombre, id_colegio))
+
+    def actualizar_ciudad(self, id_ciudad, id_departamento, nombre):
+        return self._ejecutar_insert("UPDATE ciudad SET id_departamento = %s, nombre = %s WHERE id = %s", (id_departamento, nombre, id_ciudad))
+
+    def actualizar_oficial(self, id_oficial, nombre, apellidos, cedula, correo, celular):
+        query = """
+            UPDATE oficial_arbitraje 
+            SET nombre = %s, apellidos = %s, cedula = %s, correo = %s, celular = %s 
+            WHERE id = %s
+        """
+        return self._ejecutar_insert(query, (nombre, apellidos, cedula, correo, celular, id_oficial))
+
+    def sincronizar_inscripciones(self, id_torneo, inscripciones):
+        """Actualiza las inscripciones en la BD respetando las llaves ya bloqueadas."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cursor:
+                # 1. Obtener divisiones actuales del torneo
+                cursor.execute("SELECT id_peso_oficial_uww, id FROM torneo_division WHERE id_torneo = %s", (id_torneo,))
+                divisiones_creadas = {r[0]: r[1] for r in cursor.fetchall()}
+                
+                inscripciones_memoria_tuplas = set()
+                
+                # 2. Insertar divisiones e inscripciones nuevas
+                for ins in inscripciones:
+                    for id_peso_oficial in ins['ids_divisiones']:
+                        if id_peso_oficial not in divisiones_creadas:
+                            cursor.execute("INSERT INTO torneo_division (id_torneo, id_peso_oficial_uww) VALUES (%s, %s) RETURNING id", (id_torneo, id_peso_oficial))
+                            divisiones_creadas[id_peso_oficial] = cursor.fetchone()[0]
+                            
+                        id_td = divisiones_creadas[id_peso_oficial]
+                        inscripciones_memoria_tuplas.add((ins['id_atleta'], id_td))
+                        
+                        cursor.execute("SELECT id FROM inscripcion WHERE id_peleador = %s AND id_torneo_division = %s", (ins['id_atleta'], id_td))
+                        if not cursor.fetchone():
+                            cursor.execute("INSERT INTO inscripcion (id_peleador, id_torneo_division, peso_pesaje) VALUES (%s, %s, %s)", (ins['id_atleta'], id_td, ins['peso']))
+                
+                # 3. Eliminar inscripciones que fueron quitadas en la UI (si NO están bloqueadas)
+                cursor.execute("""
+                    SELECT i.id, i.id_peleador, i.id_torneo_division 
+                    FROM inscripcion i 
+                    JOIN torneo_division td ON i.id_torneo_division = td.id 
+                    WHERE td.id_torneo = %s AND i.orden_siembra IS NULL
+                """, (id_torneo,))
+                for row in cursor.fetchall():
+                    id_ins, id_pel, id_td = row[0], row[1], row[2]
+                    if (id_pel, id_td) not in inscripciones_memoria_tuplas:
+                        cursor.execute("DELETE FROM inscripcion WHERE id = %s", (id_ins,))
+                
+                conexion.commit()
+                return True
+        except Exception as e:
+            print("Error sincronizando inscripciones:", e)
+            conexion.rollback()
+            return False
+        finally:
+            conexion.close()

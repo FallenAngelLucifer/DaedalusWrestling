@@ -149,27 +149,23 @@ class PantallaInscripcion(ttk.Frame):
         frame_busq_izq.pack(side="left", fill="y", padx=(0, 15))
         
         ttk.Label(frame_busq_izq, text="Buscar por:").grid(row=0, column=0, sticky="w", pady=2)
-        self.cmb_tipo_busqueda = ComboBuscador(frame_busq_izq, values=["ID", "Nombre", "Club", "Ciudad"], state="readonly", width=10)
+        
+        # Opciones fijas (Usamos Combobox estándar porque no necesitamos buscador interno aquí)
+        self.cmb_tipo_busqueda = ttk.Combobox(frame_busq_izq, values=["ID", "Nombre", "Club", "Ciudad"], state="readonly", width=10)
         self.cmb_tipo_busqueda.set("Nombre")
         self.cmb_tipo_busqueda.grid(row=0, column=1, sticky="w", pady=2, padx=(5, 0))
+        
+        # --- BARRA DE BÚSQUEDA ÚNICA E INTELIGENTE ---
+        self.vcmd_id = (self.register(self.validar_solo_numeros), '%P')
+        self.ent_busqueda = ttk.Entry(frame_busq_izq, width=22)
+        self.ent_busqueda.grid(row=1, column=0, columnspan=2, sticky="we", pady=5)
+        
+        # Eventos
+        self.ent_busqueda.bind("<KeyRelease>", self.actualizar_tabla_visual)
         self.cmb_tipo_busqueda.bind("<<ComboboxSelected>>", self.cambiar_tipo_busqueda)
         
-        self.frame_inputs_busqueda = ttk.Frame(frame_busq_izq)
-        self.frame_inputs_busqueda.grid(row=1, column=0, columnspan=2, sticky="we", pady=5)
-        
-        vcmd_id = (self.register(self.validar_solo_numeros), '%P')
-        self.ent_busqueda_id = ttk.Entry(self.frame_inputs_busqueda, validate='key', validatecommand=vcmd_id, width=18)
-        self.ent_busqueda_id.bind("<KeyRelease>", self.actualizar_tabla_visual)
-        
-        self.ent_busqueda_nombre = ttk.Entry(self.frame_inputs_busqueda, width=18)
-        self.ent_busqueda_nombre.bind("<KeyRelease>", self.actualizar_tabla_visual)
-        
-        self.cmb_busqueda_club = ComboBuscador(self.frame_inputs_busqueda, state="readonly", width=18)
-        self.cmb_busqueda_club.bind("<<ComboboxSelected>>", self.actualizar_tabla_visual)
-        self.cmb_busqueda_ciudad = ComboBuscador(self.frame_inputs_busqueda, state="readonly", width=18)
-        self.cmb_busqueda_ciudad.bind("<<ComboboxSelected>>", self.actualizar_tabla_visual)
-
-        self.cambiar_tipo_busqueda() 
+        # Aplicar configuración inicial
+        self.cambiar_tipo_busqueda()
         
         frame_sexo = ttk.Frame(frame_busq_izq)
         frame_sexo.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
@@ -280,23 +276,59 @@ class PantallaInscripcion(ttk.Frame):
 
         btn_box = ttk.Frame(tabla_frame)
         btn_box.pack(fill="x", pady=5)
-        
-        # --- REEMPLAZO DE BOTONES PARA PODER CONTROLARLOS ---
-        self.btn_eliminar_memoria = ttk.Button(btn_box, text="Eliminar Seleccionado", command=self.eliminar_de_memoria)
+
+        # --- 1. SUB-CONTENEDOR DE BOTONES (Garantiza que siempre estén a la izquierda) ---
+        self.frame_acciones_memoria = ttk.Frame(btn_box)
+        self.frame_acciones_memoria.pack(side="left")
+
+        self.btn_eliminar_memoria = ttk.Button(self.frame_acciones_memoria, text="Eliminar Seleccionado", command=self.eliminar_de_memoria, state="disabled")
         self.btn_eliminar_memoria.pack(side="left", padx=5)
         
-        self.btn_editar_memoria = ttk.Button(btn_box, text="Editar Seleccionado", command=self.cargar_para_editar)
+        self.btn_editar_memoria = ttk.Button(self.frame_acciones_memoria, text="Editar Seleccionado", command=self.cargar_para_editar, state="disabled")
         self.btn_editar_memoria.pack(side="left", padx=5)
+
+        # --- 2. ETIQUETA (Siempre a la derecha de los botones) ---
+        self.lbl_estadisticas = ttk.Label(btn_box, text="Atletas: 0  |  Clubes: 0  |  Ciudades: 0", foreground="#28a745", font=("Helvetica", 9, "bold"))
+        self.lbl_estadisticas.pack(side="left", padx=(15, 0))
         
-        ttk.Button(btn_box, text="Confirmar y Subir a Base de Datos", command=self.subir_inscripciones_bd).pack(side="right")
-        ttk.Button(btn_box, text="💾 Guardar Progreso", command=self.guardar_progreso).pack(side="right", padx=10)
+        # --- 3. BOTONES DE GUARDADO (A la derecha de la pantalla) ---
+        self.btn_subir_bd = ttk.Button(btn_box, text="Confirmar y Subir a Base de Datos", command=self.subir_inscripciones_bd)
+        self.btn_subir_bd.pack(side="right")
+        
+        self.btn_guardar_progreso = ttk.Button(btn_box, text="💾 Guardar Progreso", command=self.guardar_progreso)
+        self.btn_guardar_progreso.pack(side="right", padx=10)
 
         self.cambiar_estado_inscripcion("disabled")
         
         # --- NUEVO EVENTO: Escuchar selección de tabla ---
         self.tabla.bind("<<TreeviewSelect>>", self.al_seleccionar_tabla)
 
-    
+        self.actualizar_botones_guardado()
+
+    def actualizar_botones_guardado(self):
+        """Evalúa las reglas visuales de los botones de subida/progreso."""
+        if not hasattr(self, 'btn_subir_bd') or not hasattr(self, 'btn_guardar_progreso'): return
+
+        is_finalizado = getattr(self, "torneo_finalizado", False)
+        is_todo_bloqueado = getattr(self, "todo_bloqueado", False)
+        has_id = getattr(self, "torneo_debug_id", None) is not None
+
+        # 1. Torneo terminado o todas las llaves cerradas
+        if is_finalizado or is_todo_bloqueado:
+            self.btn_guardar_progreso.pack_forget()
+            self.btn_subir_bd.config(text="Continuar a Fase de Pareo")
+        
+        # 2. Torneo ya existe en la BD (Modo Edición)
+        elif has_id:
+            if not self.btn_guardar_progreso.winfo_ismapped():
+                self.btn_guardar_progreso.pack(side="right", padx=10)
+            self.btn_subir_bd.config(text="Confirmar y Guardar")
+            
+        # 3. Torneo Nuevo
+        else:
+            if not self.btn_guardar_progreso.winfo_ismapped():
+                self.btn_guardar_progreso.pack(side="right", padx=10)
+            self.btn_subir_bd.config(text="Confirmar y Subir a Base de Datos")
 
     def limpiar_buscador(self, entry, listbox, lista_completa):
         """Borra el texto del buscador y restaura la lista visual original."""
@@ -369,22 +401,32 @@ class PantallaInscripcion(ttk.Frame):
         self.actualizar_tabla_visual()
 
     def al_seleccionar_tabla(self, event):
-        # 1. Bloqueo total: Ni siquiera permite hacer clic
+        # Si el torneo entero está cerrado, bloqueamos y salimos
         if getattr(self, "todo_bloqueado", False):
             if self.tabla.selection():
                 self.tabla.selection_remove(self.tabla.selection()[0])
+            self.btn_editar_memoria.config(state="disabled")
+            self.btn_eliminar_memoria.config(state="disabled")
             return
             
         item_sel = self.tabla.selection()
-        if not item_sel: return
         
-        # 2. Bloqueo parcial: Evalúa la categoría del atleta seleccionado
-        id_atleta = int(self.tabla.item(item_sel[0], "values")[0])
+        # Si se hace clic en el vacío, desactivar botones
+        if not item_sel: 
+            self.btn_editar_memoria.config(state="disabled")
+            self.btn_eliminar_memoria.config(state="disabled")
+            return
+            
+        valores = self.tabla.item(item_sel[0], "values")
+        id_atleta = int(valores[0])
+        
         ins_data = next((i for i in self.inscripciones_memoria if i['id_atleta'] == id_atleta), None)
         if not ins_data: return
         
+        # Validar si este atleta pertenece a una llave bloqueada
         is_locked = any(div_id in getattr(self, "pesos_bloqueados_ids", set()) for div_id in ins_data['ids_divisiones'])
         
+        # Activar/Desactivar según su estado
         if is_locked:
             self.btn_editar_memoria.config(state="disabled")
             self.btn_eliminar_memoria.config(state="disabled")
@@ -447,9 +489,13 @@ class PantallaInscripcion(ttk.Frame):
         self.btn_cancelar_torneo.pack_forget()
         
         # Restaurar botones de la tabla por si estaban ocultos por un torneo cerrado
-        if hasattr(self, 'btn_editar_memoria') and not self.btn_editar_memoria.winfo_ismapped():
-            self.btn_editar_memoria.pack(side="left", padx=5)
-            self.btn_eliminar_memoria.pack(side="left", padx=5)
+        if hasattr(self, 'frame_acciones_memoria') and not self.frame_acciones_memoria.winfo_ismapped():
+            self.frame_acciones_memoria.pack(side="left", before=self.lbl_estadisticas)
+        
+        # Asegurarse de que regresen desactivados
+        if hasattr(self, 'btn_editar_memoria'):
+            self.btn_editar_memoria.config(state="disabled")
+            self.btn_eliminar_memoria.config(state="disabled")
         
         # 4. Limpiar Inscripciones
         self.inscripciones_memoria.clear()
@@ -473,7 +519,7 @@ class PantallaInscripcion(ttk.Frame):
             self.estilos_memoria_completa = []
         
         # --- CORRECCIÓN: Resetear el nuevo panel de búsqueda ---
-        if hasattr(self, 'ent_busqueda_nombre'):
+        if hasattr(self, 'ent_busqueda'):
             self.limpiar_filtros()
         else:
             self.actualizar_opciones_filtros()
@@ -487,6 +533,9 @@ class PantallaInscripcion(ttk.Frame):
         
         # --- NUEVO: Ocultar el botón tras limpiar ---
         self.actualizar_btn_nuevo_limpiar()
+
+        self.torneo_finalizado = False
+        self.actualizar_botones_guardado()
 
     def al_seleccionar_tabla(self, event):
         # Si el torneo entero está cerrado, no dejamos seleccionar nada
@@ -526,30 +575,23 @@ class PantallaInscripcion(ttk.Frame):
         return P.isdigit()
 
     def cambiar_tipo_busqueda(self, event=None):
+        # 1. Se limpia la barra automáticamente al cambiar de opción
+        self.ent_busqueda.delete(0, tk.END)
+        
         tipo = self.cmb_tipo_busqueda.get()
-        self.ent_busqueda_id.pack_forget()
-        self.ent_busqueda_nombre.pack_forget()
-        self.cmb_busqueda_club.pack_forget()
-        self.cmb_busqueda_ciudad.pack_forget()
         
-        self.ent_busqueda_id.delete(0, tk.END)
-        self.ent_busqueda_nombre.delete(0, tk.END)
-        self.cmb_busqueda_club.set('')
-        self.cmb_busqueda_ciudad.set('')
-        
-        if tipo == "ID": self.ent_busqueda_id.pack(fill="x")
-        elif tipo == "Nombre": self.ent_busqueda_nombre.pack(fill="x")
-        elif tipo == "Club": self.cmb_busqueda_club.pack(fill="x")
-        elif tipo == "Ciudad": self.cmb_busqueda_ciudad.pack(fill="x")
-        
+        # 2. Se activa o desactiva la validación de "Solo Números"
+        if tipo == "ID": 
+            self.ent_busqueda.config(validate='key', validatecommand=self.vcmd_id)
+        else: 
+            self.ent_busqueda.config(validate='none')
+            
         self.actualizar_tabla_visual()
 
     def limpiar_filtros(self):
         """Restablece todos los parámetros de búsqueda a su estado inicial."""
-        self.ent_busqueda_id.delete(0, tk.END)
-        self.ent_busqueda_nombre.delete(0, tk.END)
-        self.cmb_busqueda_club.set('Todos')
-        self.cmb_busqueda_ciudad.set('Todas')
+        self.cmb_tipo_busqueda.set("Nombre")
+        self.cambiar_tipo_busqueda() # Esto limpia el entry y ajusta validaciones
         
         self.var_filtro_m.set(True)
         self.var_filtro_f.set(True)
@@ -557,7 +599,6 @@ class PantallaInscripcion(ttk.Frame):
         self.listbox_pesos.selection_clear(0, tk.END)
         self.listbox_estilos.selection_clear(0, tk.END)
         
-        # IMPORTANTE: Forzar actualización de opciones tras limpiar
         self.actualizar_opciones_filtros()
         self.actualizar_tabla_visual()
 
@@ -818,7 +859,6 @@ class PantallaInscripcion(ttk.Frame):
         self.actualizar_tabla_visual()
 
     def actualizar_tabla_visual(self, event=None):
-        # --- NUEVO: Seguro de inicialización ---
         if not hasattr(self, 'tabla'): return 
         
         for item in self.tabla.get_children(): self.tabla.delete(item)
@@ -827,31 +867,30 @@ class PantallaInscripcion(ttk.Frame):
         if not tipo_busq: return 
         tipo = tipo_busq.get()
         
-        term = ""
-        if tipo == "ID": term = self.ent_busqueda_id.get().strip()
-        elif tipo == "Nombre": term = self.ent_busqueda_nombre.get().strip().lower()
-        elif tipo == "Club": term = self.cmb_busqueda_club.get()
-        elif tipo == "Ciudad": term = self.cmb_busqueda_ciudad.get()
+        # Capturamos el texto de la barra única
+        term = self.ent_busqueda.get().strip().lower()
 
         mostrar_m = self.var_filtro_m.get()
         mostrar_f = self.var_filtro_f.get()
         sel_pesos = [self.listbox_pesos.get(i) for i in self.listbox_pesos.curselection()]
         sel_estilos = [self.listbox_estilos.get(i) for i in self.listbox_estilos.curselection()]
 
+        # Variables para los contadores
+        total_atletas = 0
+        clubes_unicos = set()
+        ciudades_unicas = set()
+
         for ins in self.inscripciones_memoria:
             id_atl = ins['id_atleta']
             info = next((a for a in self.atletas_db if a['id'] == id_atl), None)
             if not info: continue
 
-            # 1. Filtros Checkbox (Sexo)
             if info['sexo'] == 'M' and not mostrar_m: continue
             if info['sexo'] == 'F' and not mostrar_f: continue
 
-            # 2. Filtros Listbox Múltiples (Validación por sub-cadena)
             if sel_pesos:
                 pesos_atl = ins['peso_oficial'].split(" | ")
-                if not any(p in sel_pesos for p in pesos_atl):
-                    continue
+                if not any(p in sel_pesos for p in pesos_atl): continue
             
             if sel_estilos and not any(e in sel_estilos for e in ins['estilos']): continue
 
@@ -859,15 +898,30 @@ class PantallaInscripcion(ttk.Frame):
             club = info['club'] or "Sin Club"
             ciudad = info['ciudad'] or "Sin Ciudad"
             
-            # 3. Búsqueda por Texto o Combobox
-            if term and term != "Todos" and term != "Todas":
+            # --- NUEVA BÚSQUEDA UNIVERSAL ---
+            if term:
                 if tipo == "ID" and str(id_atl) != term: continue
                 if tipo == "Nombre" and term not in nombre_completo.lower(): continue
-                if tipo == "Club" and club != term: continue
-                if tipo == "Ciudad" and ciudad != term: continue
+                if tipo == "Club" and term not in club.lower(): continue
+                if tipo == "Ciudad" and term not in ciudad.lower(): continue
 
             fila_valores = (id_atl, 0, nombre_completo, info['sexo'], club, ciudad, ins['peso'], ins['peso_oficial'], " + ".join(ins['estilos']))
             self.tabla.insert("", "end", values=fila_valores)
+            
+            # --- ACTUALIZAR CONTADORES ---
+            total_atletas += 1
+            if club != "Sin Club": clubes_unicos.add(club)
+            if ciudad != "Sin Ciudad": ciudades_unicas.add(ciudad)
+
+        # Actualizar la etiqueta (Color basado en el estado del torneo: Rojo si está cerrado, Verde si es editable)
+        if hasattr(self, 'lbl_estadisticas'):
+            color_estado = "#dc3545" if getattr(self, "todo_bloqueado", False) else "#28a745"
+            self.lbl_estadisticas.config(text=f"Atletas: {total_atletas}  |  Clubes: {len(clubes_unicos)}  |  Ciudades: {len(ciudades_unicas)}", foreground=color_estado)
+            
+        # Al refrescar/filtrar la tabla se pierde la selección, desactivar botones
+        if hasattr(self, 'btn_editar_memoria'):
+            self.btn_editar_memoria.config(state="disabled")
+            self.btn_eliminar_memoria.config(state="disabled")
 
     # ================= CARGA DE DATOS =================
     def cargar_datos_bd(self):
@@ -886,10 +940,6 @@ class PantallaInscripcion(ttk.Frame):
         
         self.map_ciudades_torneo = {c['nombre']: c['id'] for c in ciudades}
         aplicar_autocompletado(self.cmb_tor_ciudad, sorted(list(self.map_ciudades_torneo.keys())))
-
-        if hasattr(self, 'cmb_busqueda_club'):
-            aplicar_autocompletado(self.cmb_busqueda_club, ["Todos"] + [c['nombre'] for c in clubes])
-            aplicar_autocompletado(self.cmb_busqueda_ciudad, ["Todas"] + [c['nombre'] for c in ciudades])
 
     def filtrar_atletas_por_edad(self):
         idx_cat = self.cmb_categoria.current()
@@ -984,36 +1034,30 @@ class PantallaInscripcion(ttk.Frame):
         VentanaNuevoRegistro(self)
 
     def guardar_progreso(self):
-        """Guarda en la BD pero se queda en la pantalla actual."""
         self._ejecutar_guardado(ir_a_pareo=False)
 
     def subir_inscripciones_bd(self):
-        """Guarda en la BD y avanza a la pantalla de pareos."""
         self._ejecutar_guardado(ir_a_pareo=True)
 
     def _ejecutar_guardado(self, ir_a_pareo=False):
-        """Lógica central de validación, guardado y bloqueo."""
         if not self.inscripciones_memoria: 
             return messagebox.showwarning("Sin Atletas", "No hay atletas inscritos.")
-        
-        # --- SI YA SE GUARDÓ (MODO CARGADO) ---
-        if getattr(self, "torneo_debug_id", None) is not None:
-            if ir_a_pareo:
+            
+        # --- REGLA: SI ESTÁ TODO BLOQUEADO O FINALIZADO, SOLO AVANZAR ---
+        if getattr(self, "torneo_finalizado", False) or getattr(self, "todo_bloqueado", False):
+            if ir_a_pareo and getattr(self, "torneo_debug_id", None):
                 from pantalla_pareo import PantallaPareo
                 p_pareo = self.controller.pantallas.get(PantallaPareo)
                 if p_pareo:
                     p_pareo.cargar_torneo(self.torneo_debug_id)
                     self.controller.mostrar_pantalla(PantallaPareo)
-            else:
-                messagebox.showinfo("Guardado", "El torneo ya se encuentra sincronizado con la Base de Datos.")
             return
-            
-        # 1. Agrupar inscripciones por división (estilo y peso) para contar parejas
+
+        # 1. Agrupar y Validar Parejas
         divisiones = {}
         for ins in self.inscripciones_memoria:
             id_atleta = ins['id_atleta']
             nombre_atleta = next((f"{a['apellidos']}, {a['nombre']}" for a in self.atletas_db if a['id'] == id_atleta), "Atleta Desconocido")
-            
             for i, id_div in enumerate(ins['ids_divisiones']):
                 estilo = ins['estilos'][i]
                 peso_oficial_str = "Desconocido"
@@ -1021,90 +1065,82 @@ class PantallaInscripcion(ttk.Frame):
                     if p['id'] == id_div:
                         peso_oficial_str = f"{p['peso_maximo']}kg"
                         break
-                        
                 clave_div = (id_div, estilo, peso_oficial_str)
-                if clave_div not in divisiones:
-                    divisiones[clave_div] = []
+                if clave_div not in divisiones: divisiones[clave_div] = []
                 divisiones[clave_div].append(nombre_atleta)
                 
-        # 2. Validar si hay al menos una pareja y agrupar a los solitarios
         hay_pareja = False
         atletas_solitarios = {} 
-        
         for (id_div, estilo, peso_str), atletas in divisiones.items():
-            if len(atletas) >= 2:
+            if len(atletas) >= 2: 
                 hay_pareja = True
             elif len(atletas) == 1:
-                nombre = atletas[0]
-                div_str = f"{estilo} - {peso_str}"
-                if nombre not in atletas_solitarios:
-                    atletas_solitarios[nombre] = []
-                atletas_solitarios[nombre].append(div_str)
+                # --- NUEVA CONDICIÓN: Ignorar si la llave de esta división ya fue confirmada ---
+                if id_div not in getattr(self, "pesos_bloqueados_ids", set()):
+                    nombre = atletas[0]
+                    if nombre not in atletas_solitarios: 
+                        atletas_solitarios[nombre] = []
+                    atletas_solitarios[nombre].append(f"{estilo} - {peso_str}")
                 
-        # 3. Regla A: Debe haber al menos una pareja
         if not hay_pareja:
-            return messagebox.showwarning("Parejas Insuficientes", "Debe haber al menos 2 atletas en una misma división de peso y estilo para poder generar un torneo válido.")
+            return messagebox.showwarning("Parejas Insuficientes", "Debe haber al menos 2 atletas en una misma división.")
             
-        # 4. Regla B: Avisar si hay atletas sin pareja antes de confirmar
         if atletas_solitarios:
-            solitarios_lista = []
-            for nombre, divs in atletas_solitarios.items():
-                solitarios_lista.append(f"• {nombre} ({', '.join(divs)})")
-                
-            mensaje = "Los siguientes atletas están solos en su división (sin oponente):\n\n"
-            mensaje += "\n".join(solitarios_lista[:15])
-            if len(solitarios_lista) > 15:
-                mensaje += f"\n... y {len(solitarios_lista) - 15} más."
-            mensaje += "\n\n¿Desea continuar y guardar el torneo de todos modos?"
-            
-            respuesta = messagebox.askyesno("Atletas sin oponente", mensaje)
-            if not respuesta:
-                return 
+            mensaje = "Atletas solos en su división:\n\n" + "\n".join([f"• {n} ({', '.join(d)})" for n, d in list(atletas_solitarios.items())[:15]])
+            if len(atletas_solitarios) > 15: mensaje += f"\n... y {len(atletas_solitarios) - 15} más."
+            mensaje += "\n\n¿Desea continuar?"
+            if not messagebox.askyesno("Atletas sin oponente", mensaje): return 
 
-        # --- Continuar con el guardado en BD ---
-        id_cat = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
-        try: fecha_db = datetime.strptime(self.ent_tor_fecha.get().strip(), "%d/%m/%Y").strftime("%Y-%m-%d")
-        except: fecha_db = datetime.now().strftime("%Y-%m-%d")
-
-        id_ciu = self.map_ciudades_torneo.get(self.cmb_tor_ciudad.get())
-        datos_torneo = {
-            "nombre": self.torneo_nombre_conf, 
-            "lugar": self.torneo_lugar_conf, 
-            "id_ciudad": id_ciu, 
-            "fecha": fecha_db, 
-            "id_categoria": id_cat
-        }
+        # --- GUARDAR O SINCRONIZAR EN BD ---
+        id_existente = getattr(self, "torneo_debug_id", None)
         
-        id_torneo = self.db.guardar_torneo_completo(datos_torneo, self.inscripciones_memoria)
-        
-        if id_torneo:
-            # --- ASIGNACIÓN CRÍTICA (Simula que fue cargado de la BD) ---
-            self.torneo_debug_id = id_torneo
-            
-            # Bloquear edición de datos generales
-            self.ent_tor_nombre.config(state="disabled")
-            self.ent_tor_lugar.config(state="disabled")
-            self.cmb_categoria.config(state="disabled")
-            if hasattr(self, 'cmb_tor_ciudad'): 
-                self.cmb_tor_ciudad.config(state="disabled")
-            
-            self.btn_confirmar_torneo.config(text="Modificar Torneo", state="disabled")
-            self.btn_cancelar_torneo.pack_forget()
-            
-            self.actualizar_btn_nuevo_limpiar()
-            
-            # --- DECIDIR ACCIÓN FINAL ---
-            if ir_a_pareo:
-                messagebox.showinfo("Éxito", "Torneo guardado en la Base de Datos. Pasando a Fase de Pareos.")
-                from pantalla_pareo import PantallaPareo
-                p_pareo = self.controller.pantallas.get(PantallaPareo)
-                if p_pareo:
-                    p_pareo.cargar_torneo(id_torneo)
-                    self.controller.mostrar_pantalla(PantallaPareo)
+        if id_existente:
+            # MODO: SINCRONIZAR ACTUALIZACIÓN
+            if self.db.sincronizar_inscripciones(id_existente, self.inscripciones_memoria):
+                self.actualizar_botones_guardado()
+                if ir_a_pareo:
+                    messagebox.showinfo("Éxito", "Cambios guardados. Pasando a Fase de Pareos.")
+                    from pantalla_pareo import PantallaPareo
+                    p_pareo = self.controller.pantallas.get(PantallaPareo)
+                    if p_pareo:
+                        p_pareo.cargar_torneo(id_existente)
+                        self.controller.mostrar_pantalla(PantallaPareo)
+                else:
+                    messagebox.showinfo("Éxito", "Progreso sincronizado correctamente en la Base de Datos.")
             else:
-                messagebox.showinfo("Éxito", "Progreso guardado correctamente en la Base de Datos.")
+                messagebox.showerror("Error", "No se pudo sincronizar la base de datos.")
         else:
-            messagebox.showerror("Error", "Error al guardar en la base de datos.")
+            # MODO: CREAR NUEVO TORNEO
+            id_cat = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
+            try: fecha_db = datetime.strptime(self.ent_tor_fecha.get().strip(), "%d/%m/%Y").strftime("%Y-%m-%d")
+            except: fecha_db = datetime.now().strftime("%Y-%m-%d")
+            id_ciu = self.map_ciudades_torneo.get(self.cmb_tor_ciudad.get())
+            datos_torneo = {"nombre": self.torneo_nombre_conf, "lugar": self.torneo_lugar_conf, "id_ciudad": id_ciu, "fecha": fecha_db, "id_categoria": id_cat}
+            
+            nuevo_id = self.db.guardar_torneo_completo(datos_torneo, self.inscripciones_memoria)
+            
+            if nuevo_id:
+                self.torneo_debug_id = nuevo_id
+                self.ent_tor_nombre.config(state="disabled")
+                self.ent_tor_lugar.config(state="disabled")
+                self.cmb_categoria.config(state="disabled")
+                if hasattr(self, 'cmb_tor_ciudad'): self.cmb_tor_ciudad.config(state="disabled")
+                self.btn_confirmar_torneo.config(text="Modificar Torneo", state="disabled")
+                self.btn_cancelar_torneo.pack_forget()
+                self.actualizar_btn_nuevo_limpiar()
+                self.actualizar_botones_guardado() # Se cambian los botones a modo "Guardado"
+                
+                if ir_a_pareo:
+                    messagebox.showinfo("Éxito", "Torneo guardado en la BD. Pasando a Fase de Pareos.")
+                    from pantalla_pareo import PantallaPareo
+                    p_pareo = self.controller.pantallas.get(PantallaPareo)
+                    if p_pareo:
+                        p_pareo.cargar_torneo(nuevo_id)
+                        self.controller.mostrar_pantalla(PantallaPareo)
+                else:
+                    messagebox.showinfo("Éxito", "Torneo inicial guardado correctamente.")
+            else:
+                messagebox.showerror("Error", "Error al crear el torneo en la base de datos.")
 
     def abrir_ventana_cargar_torneo(self):
         ventana = tk.Toplevel(self)
@@ -1130,6 +1166,8 @@ class PantallaInscripcion(ttk.Frame):
         torneos = self.db.obtener_lista_torneos_debug()
         for t in torneos:
             tabla_torneos.insert("", "end", values=(t['id'], t['nombre'], t['fecha'], t['categoria']))
+
+        tabla_torneos.bind("<Double-1>", lambda e: self.ejecutar_carga_torneo(tabla_torneos, ventana))
 
         btn_cargar = ttk.Button(ventana, text="Cargar en Pantalla", command=lambda: self.ejecutar_carga_torneo(tabla_torneos, ventana))
         btn_cargar.pack(pady=10)
@@ -1186,7 +1224,6 @@ class PantallaInscripcion(ttk.Frame):
             })
             
         self.actualizar_opciones_filtros()
-        self.actualizar_tabla_visual()
 
         # 5. --- APLICACIÓN MANUAL DE ESTADO "CONFIRMADO" ---
         self.torneo_debug_id = id_torneo
@@ -1227,16 +1264,22 @@ class PantallaInscripcion(ttk.Frame):
             # --- BLOQUEO ABSOLUTO ---
             self.todo_bloqueado = True
             self.cambiar_estado_inscripcion("disabled")
-            if hasattr(self, 'btn_editar_memoria'):
-                self.btn_editar_memoria.pack_forget()
-                self.btn_eliminar_memoria.pack_forget()
+            if hasattr(self, 'frame_acciones_memoria'):
+                self.frame_acciones_memoria.pack_forget() # Oculta el contenedor entero
             messagebox.showinfo("Torneo Cerrado", "Este torneo tiene TODAS sus llaves confirmadas.\nLa fase de inscripción pasa a modo de Solo Lectura.")
         else:
             # --- BLOQUEO PARCIAL ---
             self.todo_bloqueado = False
-            if hasattr(self, 'btn_editar_memoria'):
-                self.btn_editar_memoria.pack(side="left", padx=5)
-                self.btn_eliminar_memoria.pack(side="left", padx=5)
+            if hasattr(self, 'frame_acciones_memoria'):
+                # Usar 'before' garantiza que vuelva a aparecer a la izquierda del texto
+                self.frame_acciones_memoria.pack(side="left", before=self.lbl_estadisticas)
+                self.btn_editar_memoria.config(state="disabled")
+                self.btn_eliminar_memoria.config(state="disabled")
             messagebox.showinfo("Cargado", "Torneo cargado en memoria.\nRecuerde que no podrá editar a los atletas cuyas categorías ya tengan una llave confirmada.")
             
         self.actualizar_btn_nuevo_limpiar()
+
+        # Revisamos si la BD trajo fecha_fin para saber si está finalizado
+        self.torneo_finalizado = True if datos_torneo.get('fecha_fin') else False
+        self.actualizar_botones_guardado()
+        self.actualizar_tabla_visual()

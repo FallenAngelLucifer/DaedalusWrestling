@@ -96,9 +96,15 @@ class ComboBuscador(ttk.Frame):
             if st == "disabled":
                 self.entry.config(state="disabled")
                 self.btn.config(bg="#f0f0f0", fg="#a0a0a0")
+            elif st == "readonly":
+                self.entry.config(state="readonly")
+                self.btn.config(bg="#e1e1e1", fg="black")
+                # Si es readonly, permitimos abrir la lista haciendo clic en la caja
+                self.entry.bind("<Button-1>", lambda e: self.alternar(e))
             else:
                 self.entry.config(state="normal")
                 self.btn.config(bg="#e1e1e1", fg="black")
+                self.entry.unbind("<Button-1>") # Quitamos el clic si es normal
         if 'values' in kwargs:
             self.lista_valores = list(kwargs['values'])
             
@@ -147,13 +153,30 @@ class ComboBuscador(ttk.Frame):
     def alternar(self, event):
         if self.entry.cget("state") == "disabled": return
         
-        if self.panel.winfo_ismapped():
-            self.panel.withdraw()
-            self.validar_texto() # Validamos al cerrarlo manualmente
-        else:
-            class EventoFalso: keysym = ''
-            self.filtrar(EventoFalso())
-            self.entry.focus_set()
+        try:
+            if not self.winfo_exists() or not self.panel.winfo_exists(): return
+            
+            if self.panel.winfo_ismapped():
+                self.panel.withdraw()
+                self.validar_texto() 
+            else:
+                # --- SOLUCIÓN: AL DAR CLIC, MOSTRAR SIEMPRE LA LISTA COMPLETA ---
+                self.listbox.delete(0, tk.END)
+                for item in self.lista_valores: 
+                    self.listbox.insert(tk.END, item)
+                
+                self.mostrar_panel()
+                self.entry.focus_set()
+                
+                # Auto-desplazarse (scroll) hasta el elemento actualmente seleccionado
+                txt_actual = self.get()
+                if txt_actual in self.lista_valores:
+                    idx = self.lista_valores.index(txt_actual)
+                    self.listbox.selection_clear(0, tk.END)
+                    self.listbox.selection_set(idx)
+                    self.listbox.see(idx) # Hace scroll automático
+        except Exception:
+            pass
             
     def seleccionar(self, event):
         if self.listbox.curselection():

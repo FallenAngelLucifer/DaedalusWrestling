@@ -90,16 +90,18 @@ class PantallaPareo(ttk.Frame):
             self.btn_confirmar_todas.pack_forget()
 
     def exportar_imagen_llave(self, tab=None, ruta_directa=None):
-        """Exporta la llave completa con fondo oscuro, colores vivos y alta nitidez."""
+        """Exporta la llave completa con márgenes simétricos y alta nitidez."""
         if not tab: tab = self.notebook.nametowidget(self.notebook.select())
         
         tab.canvas.update()
-        bbox = tab.canvas.bbox("all")
-        if not bbox: return False
         
-        x1, y1, x2, y2 = bbox
-        # Aumentamos margen para evitar que se corten los bordes exteriores
-        ancho, alto = (x2 - x1 + 120), (y2 - y1 + 120)
+        # --- CAMBIO: Leemos el margen perfecto que ya le dimos a la interfaz visual ---
+        region = tab.canvas.cget("scrollregion")
+        if not region: return False
+        
+        # Extraemos las coordenadas calculadas (min_x, min_y, max_x, max_y)
+        x1, y1, x2, y2 = map(int, region.split())
+        ancho, alto = (x2 - x1), (y2 - y1)
         
         estilo = getattr(tab, "estilo", "Estilo")
         peso = tab.cmb_peso.get() or "Peso"
@@ -114,19 +116,17 @@ class PantallaPareo(ttk.Frame):
 
         ps_temp = f"temp_export_{self.id_torneo}.ps"
         try:
-            # Captura con coordenadas ajustadas para incluir el margen
+            # Captura usando las coordenadas exactas del scrollregion
             tab.canvas.postscript(
                 file=ps_temp, colormode='color',
-                x=x1 - 60, y=y1 - 60, 
+                x=x1, y=y1, 
                 width=ancho, height=alto,
                 pagewidth=ancho, pageheight=alto
             )
             
             with Image.open(ps_temp) as img:
-                # scale=4 es vital para que las líneas de 2px se vean sólidas y no pixeladas
                 img.load(scale=4) 
                 
-                # Restaurar el fondo gris original (#1e1e1e -> 30,30,30)
                 fondo_final = Image.new("RGB", img.size, COLOR_FONDO_UI)
                 
                 if img.mode == 'RGBA':
@@ -482,16 +482,18 @@ class PantallaPareo(ttk.Frame):
 
         ttk.Label(top_frame, text="División de Peso:").pack(side="left", padx=5)
         
-        lista_pesos = list(pesos_dict.keys())
+        # --- SOLUCIÓN: ORDENAR LOS PESOS MATEMÁTICAMENTE (Menor a Mayor) ---
+        lista_pesos = sorted(list(pesos_dict.keys()), key=lambda x: float(x.replace(" kg", "").strip()))
+        
         cmb_peso = ComboBuscador(top_frame, values=lista_pesos, state="readonly", width=15)
         cmb_peso.pack(side="left", padx=5)
         cmb_peso.set(lista_pesos[0]) # Seleccionar el primero por defecto
 
-        # Guardamos la referencia en el tab para poder ocultarlo después
         tab.btn_confirmar = ttk.Button(top_frame, text="Confirmar y Bloquear Llave", command=lambda: self.bloquear_llave(estilo, cmb_peso.get()))
-        tab.btn_confirmar.pack(side="right", padx=20)
+        # (El empaquetado del botón confirmar se maneja dinámicamente en procesar_y_dibujar)
 
-        # Lienzo (Canvas)
+        # ================= ¡AQUÍ ESTABA EL BLOQUE PERDIDO! =================
+        # Lienzo (Canvas) y sus barras de desplazamiento clásicas
         canvas_frame = ttk.Frame(tab)
         canvas_frame.pack(fill="both", expand=True, pady=10)
 
@@ -503,19 +505,48 @@ class PantallaPareo(ttk.Frame):
         canvas = tk.Canvas(canvas_frame, bg="#1e1e1e", yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
         canvas.pack(side="left", fill="both", expand=True)
         scroll_y.config(command=canvas.yview); scroll_x.config(command=canvas.xview)
+        # ===================================================================
 
         # Almacenar en el tab para uso posterior
         tab.canvas = canvas
         tab.estilo = estilo
         tab.cmb_peso = cmb_peso
         
-        # Eventos
+        # --- FUNCIONES DE SCROLL CON RUEDA DEL RATÓN ---
+        def on_mousewheel_y(event):
+            # Soporte cruzado: Windows/MacOS usan event.delta, Linux usa num 4 y 5
+            if event.delta:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif event.num == 4: canvas.yview_scroll(-1, "units")
+            elif event.num == 5: canvas.yview_scroll(1, "units")
+
+        def on_mousewheel_x(event):
+            if event.delta:
+                canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+            elif event.num == 4: canvas.xview_scroll(-1, "units")
+            elif event.num == 5: canvas.xview_scroll(1, "units")
+
+        # TRUCO TKINTER: El canvas necesita tener el "foco" para escuchar la rueda del ratón.
+        canvas.bind("<Enter>", lambda e: canvas.focus_set())
+        
+        # Asignar Scroll Vertical (Rueda normal)
+        canvas.bind("<MouseWheel>", on_mousewheel_y)
+        canvas.bind("<Button-4>", on_mousewheel_y) # Soporte Linux
+        canvas.bind("<Button-5>", on_mousewheel_y) # Soporte Linux
+
+        # Asignar Scroll Horizontal (Manteniendo Shift + Rueda)
+        canvas.bind("<Shift-MouseWheel>", on_mousewheel_x)
+        canvas.bind("<Shift-Button-4>", on_mousewheel_x) 
+        canvas.bind("<Shift-Button-5>", on_mousewheel_x) 
+        
+        # Eventos Originales
         cmb_peso.bind("<<ComboboxSelected>>", lambda e: self.procesar_y_dibujar(tab))
         canvas.bind("<Button-1>", lambda e: self.on_canvas_click(e, tab))
         
-        # Nuevos Eventos para el Tooltip
+        # Eventos para el Tooltip
         canvas.bind("<Motion>", lambda e: self.on_canvas_motion(e, tab))
-        canvas.bind("<Leave>", lambda e: self.ocultar_tooltip())
+        # Al salir, quitamos el tooltip y soltamos el foco para no interferir con otras ventanas
+        canvas.bind("<Leave>", lambda e: [self.ocultar_tooltip(), self.focus_set()])
 
         # Dibujar la primera llave apenas se carga la pestaña
         self.procesar_y_dibujar(tab)
@@ -539,11 +570,11 @@ class PantallaPareo(ttk.Frame):
         self.dibujar_llave(tab.canvas, self.llaves_generadas[llave_key], llave_key)
         
     def generar_pareo_optimo(self, atletas):
-        """Algoritmo Seeding: Separa a los atletas del mismo club lo más lejos posible."""
+        """Algoritmo Seeding: Separa clubes y fuerza a los impares (Byes) hacia arriba."""
         n = len(atletas)
         if n == 0: return []
         
-        # --- REGLA ESTRICTA: Si es 1 solo atleta, devolvemos la lista de 1 elemento ---
+        # Regla estricta: Si es 1 solo atleta
         if n == 1: 
             return [atletas[0]] 
         
@@ -555,25 +586,28 @@ class PantallaPareo(ttk.Frame):
         for a in atletas: clubes.setdefault(a['club'], []).append(a)
         clubes_ordenados = sorted(clubes.values(), key=len, reverse=True)
         
-        # 3. Esparcir alternando para que no queden juntos en la lista inicial
+        # 3. Esparcir alternando para que no queden compañeros juntos
         atletas_esparcidos = []
         while any(clubes_ordenados):
             for club_list in clubes_ordenados:
                 if club_list: atletas_esparcidos.append(club_list.pop(0))
                     
-        # 4. Generar patrón de siembra
-        def generar_semillas(size):
-            if size <= 1: return [0]
-            if size == 2: return [0, 1]
-            mitad = generar_semillas(size // 2)
-            return [val for par in zip(mitad, [size - 1 - x for x in mitad]) for val in par]
-            
-        patron = generar_semillas(potencia)
-        
-        # 5. Insertar atletas en sus posiciones óptimas, dejando 'Vacío' (Byes)
+        # 4. --- NUEVA REGLA ESTÉTICA: BYES ARRIBA ---
+        # Calculamos cuántos espacios vacíos necesitamos
+        byes = potencia - n
         llave_final = [None] * potencia
+        
+        # Asignamos los byes a los primeros índices impares (1, 3, 5...)
+        # Esto hace que el atleta quede en el índice par (0, 2, 4...) y visualmente arriba
+        indices_impares = [i for i in range(1, potencia, 2)]
+        posiciones_byes = set(indices_impares[:byes])
+        
+        # Las posiciones disponibles son todas las que NO fueron marcadas como byes
+        posiciones_disponibles = [i for i in range(potencia) if i not in posiciones_byes]
+        
+        # Insertar a los atletas ya separados por club en las posiciones disponibles
         for i, atleta in enumerate(atletas_esparcidos):
-            llave_final[patron[i]] = atleta
+            llave_final[posiciones_disponibles[i]] = atleta
             
         return llave_final
 
@@ -593,7 +627,7 @@ class PantallaPareo(ttk.Frame):
         rondas_totales = int(math.log2(potencia)) if potencia > 1 else 0
 
         box_w, box_h, x_pad, y_pad = 140, 30, 60, 20
-        x_start, y_start = 20, 20
+        x_start, y_start = 60, 60
 
         # Coordenadas y Matriz (Mantenido igual)
         y_pos = []
@@ -739,7 +773,12 @@ class PantallaPareo(ttk.Frame):
                     # Línea de salida hacia la siguiente ronda
                     canvas.create_line(mid_x, next_y, next_x, next_y, fill="white", width=2)
 
-                    canvas.config(scrollregion=canvas.bbox("all"))
+        # --- CAMBIO: Margen interno dinámico simétrico ---
+        bbox = canvas.bbox("all")
+        if bbox:
+            # Agregamos 60px exactos de margen en las 4 direcciones (Izquierda, Arriba, Derecha, Abajo)
+            min_x, min_y, max_x, max_y = bbox[0] - 60, bbox[1] - 60, bbox[2] + 60, bbox[3] + 60
+            canvas.config(scrollregion=(min_x, min_y, max_x, max_y))
 
     # ================= EVENTOS DE INTERACCIÓN =================
     def on_canvas_click(self, event, tab):
