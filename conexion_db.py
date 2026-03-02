@@ -439,8 +439,8 @@ class ConexionDB:
                     JOIN torneo_division td ON c.id_torneo_division = td.id
                     JOIN peso_oficial_uww p ON td.id_peso_oficial_uww = p.id
                     JOIN estilo_lucha e ON p.id_estilo_lucha = e.id
-                    JOIN inscripcion i_gan ON c.id_inscripcion_ganador = i_gan.id
-                    JOIN peleador pel ON i_gan.id_peleador = pel.id
+                    LEFT JOIN inscripcion i_gan ON c.id_inscripcion_ganador = i_gan.id
+                    LEFT JOIN peleador pel ON i_gan.id_peleador = pel.id
                     LEFT JOIN club cl ON pel.id_club = cl.id
                     LEFT JOIN ciudad ci ON cl.id_ciudad = ci.id
                     LEFT JOIN tipo_victoria tv ON c.id_tipo_victoria = tv.id
@@ -457,18 +457,20 @@ class ConexionDB:
                         
                     motivo = f"{r['codigo_uww']} - {r['motivo_desc']}" if r['codigo_uww'] else "Decisión"
                     
-                    # Reconstruye la memoria agregando los árbitros y el ID del combate
-                    dict_resultados[llave_key][r['identificador_llave']] = {
-                        "id": r['id_ganador'],
-                        "nombre": f"{r['apellidos']}, {r['nombre']}",
-                        "club": r['club'] or "Sin Club",
-                        "ciudad": r['ciudad'] or "No especificada",
-                        "motivo_victoria": motivo,
-                        "id_combate": r['id_combate'],
-                        "id_arbitro": r['id_arbitro'],
-                        "id_juez": r['id_juez'],
-                        "id_jefe_tapiz": r['id_jefe_tapiz']
-                    }
+                    if r['id_ganador'] is None:
+                        # Es un 2DSQ (No hay ganador en la BD)
+                        dict_resultados[llave_key][r['identificador_llave']] = {
+                            "id": -1, "nombre": "Doble Descalificación", "club": "---", "ciudad": "---",
+                            "motivo_victoria": "2DSQ - Ambos descalificados", "id_combate": r['id_combate'],
+                            "id_arbitro": r['id_arbitro'], "id_juez": r['id_juez'], "id_jefe_tapiz": r['id_jefe_tapiz']
+                        }
+                    else:
+                        dict_resultados[llave_key][r['identificador_llave']] = {
+                            "id": r['id_ganador'], "nombre": f"{r['apellidos']}, {r['nombre']}",
+                            "club": r['club'] or "Sin Club", "ciudad": r['ciudad'] or "No especificada",
+                            "motivo_victoria": motivo, "id_combate": r['id_combate'],
+                            "id_arbitro": r['id_arbitro'], "id_juez": r['id_juez'], "id_jefe_tapiz": r['id_jefe_tapiz']
+                        }
                 return dict_resultados
         except Exception as e:
             print(f"Error cargando resultados de combates: {e}")

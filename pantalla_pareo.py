@@ -139,13 +139,17 @@ class PantallaPareo(ttk.Frame):
             # Buscar el bracket más grande involucrado para darle nombre a la fase
             max_dist = max(p["distancia"] for p in pendientes if p["ronda"] == ronda_actual)
             
+            # --- NUEVO: Calcular rondas totales faltantes en todo el torneo ---
+            rondas_faltantes = max(p["distancia"] for p in pendientes) + 1
+            
             if max_dist == 0: nombre_fase = "Finales"
             elif max_dist == 1: nombre_fase = "Semifinales"
             elif max_dist == 2: nombre_fase = "Cuartos de final"
             elif max_dist == 3: nombre_fase = "Octavos de final"
             else: nombre_fase = "Eliminatorias"
             
-            texto = f"Peleas: {total_peleas} | Completadas: {completadas} | Faltan: {faltan}  |  Fase: {nombre_fase} (Ronda {ronda_actual}, {restantes_ronda} restantes)"
+            # --- NUEVO: Añadido "Rondas Faltantes" a la cadena de texto ---
+            texto = f"Peleas: {total_peleas} | Completadas: {completadas} | Faltan: {faltan}  |  Rondas Faltantes: {rondas_faltantes}  |  Fase: {nombre_fase} (Ronda {ronda_actual}, {restantes_ronda} restantes)"
             self.lbl_estado_torneo.config(text=texto, foreground="#17a2b8")
 
     def exportar_todas_las_fichas_pdf(self):
@@ -358,9 +362,7 @@ class PantallaPareo(ttk.Frame):
     def regresar_a_inscripcion(self):
         """Regresa a la pantalla de inscripción forzando una actualización de su estado."""
         
-        # --- NUEVO: Cerrar panel de combate flotante si estaba abierto ---
-        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
-            self.panel_combate.destroy()
+        self.cerrar_panel_combate() # <-- NUEVO
             
         from pantalla_inscripcion import PantallaInscripcion
         
@@ -464,19 +466,26 @@ class PantallaPareo(ttk.Frame):
                         if left not in (None, "SKIP") and right not in (None, "SKIP"):
                             match_id = f"R{r+1}_M{k}"
                             ganador = self.resultados_combates.get(llave_key, {}).get(match_id)
-                            # --- CORRECCIÓN AQUÍ: Se añade "ronda": r + 1 ---
+                            
+                            # --- AUTO-AVANCE DE VICTORIAS POR DESCALIFICACIÓN ---
+                            p_rojo = self.obtener_peleador_real(left)
+                            p_azul = self.obtener_peleador_real(right)
+                            
+                            if not ganador and p_rojo and p_azul:
+                                if p_rojo.get("id") == -1 and p_azul.get("id") != -1:
+                                    ganador = p_azul.copy(); ganador["motivo_victoria"] = "VFO - Op. Descalificado"
+                                elif p_azul.get("id") == -1 and p_rojo.get("id") != -1:
+                                    ganador = p_rojo.copy(); ganador["motivo_victoria"] = "VFO - Op. Descalificado"
+                                elif p_rojo.get("id") == -1 and p_azul.get("id") == -1:
+                                    ganador = {"id": -1, "nombre": "Doble Descalificación", "club": "---", "ciudad": "---", "motivo_victoria": "2DSQ"}
+
                             next_r.append({
-                                "tipo": "combate", 
-                                "ronda": r + 1, 
-                                "match_id": match_id, 
-                                "ganador": ganador, 
-                                "peleador_rojo": left, 
-                                "peleador_azul": right
+                                "tipo": "combate", "ronda": r + 1, "match_id": match_id, 
+                                "ganador": ganador, "peleador_rojo": left, "peleador_azul": right
                             })
                         else:
                             next_r.append(left if left not in (None, "SKIP") else right if right not in (None, "SKIP") else None)
                     grid.append(next_r)
-                self.grids_generados[llave_key] = grid
 
     def verificar_estado_torneo(self):
         """Mantiene el botón en Rojo hasta que el usuario cierre el torneo manualmente."""
@@ -537,21 +546,27 @@ class PantallaPareo(ttk.Frame):
         self.tree_cartelera.column("rojo", width=250)
         self.tree_cartelera.column("azul", width=250)
         
-        self.tree_cartelera.pack(fill="both", expand=True)
-        
         # Evento de doble clic para iniciar pelea
         self.tree_cartelera.bind("<Double-1>", self.iniciar_pelea_desde_cartelera)
 
-        ttk.Label(self.tab_cartelera, text="* Haz doble clic en un combate para abrir el marcador oficial e iniciarlo.", font=("Helvetica", 9, "italic")).pack(pady=10)
+        # --- SOLUCIÓN: CONTENEDOR INFERIOR ANCLADO ---
+        # Empaquetamos esto ANTES que la tabla, asegurando que nunca se corte
+        frame_inferior = ttk.Frame(self.tab_cartelera)
+        frame_inferior.pack(side="bottom", fill="x", pady=(5, 5)) # Márgenes reducidos
 
-        # --- NUEVO: BOTÓN DE CIERRE DE TORNEO ---
-        self.btn_cerrar_torneo = tk.Button(self.tab_cartelera, text="🏆 CERRAR TORNEO Y GENERAR REPORTE", font=("Helvetica", 12, "bold"), bg="#ff4d4d", fg="white", command=self.cerrar_torneo)
-        self.btn_cerrar_torneo.pack(pady=15, ipadx=15, ipady=8)
+        ttk.Label(frame_inferior, text="* Haz doble clic en un combate para abrir el marcador oficial e iniciarlo.", font=("Helvetica", 9, "italic")).pack(pady=(0, 5))
+
+        # --- BOTÓN DE CIERRE DE TORNEO ---
+        # Reducimos el ipady a 5 para que no se vea tan estirado
+        self.btn_cerrar_torneo = tk.Button(frame_inferior, text="🏆 CERRAR TORNEO Y GENERAR REPORTE", font=("Helvetica", 12, "bold"), bg="#ff4d4d", fg="white", command=self.cerrar_torneo)
+        self.btn_cerrar_torneo.pack(ipadx=15, ipady=5)
+
+        # --- TABLA EMPAQUETADA AL FINAL ---
+        # Como se empaqueta de último, solo tomará el espacio "sobrante" del centro
+        self.tree_cartelera.pack(side="top", fill="both", expand=True)
 
     def al_cambiar_pestana(self, event):
-        # --- NUEVO: Cerrar panel si el usuario cambia de pestaña ---
-        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
-            self.panel_combate.destroy()
+        self.cerrar_panel_combate() # <-- NUEVO
             
         # Si el usuario selecciona la pestaña de Cartelera (índice 0), la actualizamos
         if self.notebook.index(self.notebook.select()) == 0:
@@ -703,6 +718,9 @@ class PantallaPareo(ttk.Frame):
         tab.btn_confirmar = ttk.Button(top_frame, text="Confirmar Llave", command=lambda: self.bloquear_llave(estilo, cmb_peso.get()))
         tab.btn_confirmar_todas = ttk.Button(top_frame, text="✅ Confirmar Todas las Llaves", command=self.confirmar_todas_las_llaves)
 
+        # --- NUEVO: ETIQUETA DE ESTADÍSTICAS LOCALES ---
+        tab.lbl_estado_categoria = ttk.Label(top_frame, text="", font=("Helvetica", 9, "bold"))
+
         # ================= ¡AQUÍ ESTABA EL BLOQUE PERDIDO! =================
         # Lienzo (Canvas) y sus barras de desplazamiento clásicas
         canvas_frame = ttk.Frame(tab)
@@ -771,28 +789,64 @@ class PantallaPareo(ttk.Frame):
         total_divs = sum(len(p) for p in self.datos.values())
         todas_bloqueadas = (len(self.divisiones_bloqueadas) >= total_divs) and (total_divs > 0)
 
-        # 1. Ocultar todos los botones primero para evitar duplicados o mal orden
+        # 1. Ocultar todos los botones primero para limpiar la interfaz
         if hasattr(tab, 'btn_img'): tab.btn_img.pack_forget()
         if hasattr(tab, 'btn_confirmar'): tab.btn_confirmar.pack_forget()
         if hasattr(tab, 'btn_confirmar_todas'): tab.btn_confirmar_todas.pack_forget()
+        if hasattr(tab, 'lbl_estado_categoria'): tab.lbl_estado_categoria.pack_forget()
 
-        # 2. Lógica de visibilidad y orden de derecha a izquierda
-        if todas_bloqueadas:
+        # 2. DEFINIR EL MODO DE EDICIÓN (¡CRÍTICO! Debe ser antes de dibujar)
+        if todas_bloqueadas or llave_key in self.divisiones_bloqueadas:
             self.modo_edicion = False
+        else:
+            self.modo_edicion = True
+
+        # 3. DIBUJAR LA LLAVE (Ahora sí usará el modo correcto desde el inicio)
+        self.dibujar_llave(tab.canvas, self.llaves_generadas[llave_key], llave_key)
+
+        # 4. MOSTRAR BOTONES Y ETIQUETAS SEGÚN EL ESTADO
+        if todas_bloqueadas:
             # Torneo completo: Solo aparece exportar imagen
             if hasattr(tab, 'btn_img'): tab.btn_img.pack(side="right", padx=10)
+
+            # --- LÓGICA DE ETIQUETA LOCAL ---
+            grid = self.grids_generados.get(llave_key, [])
+            total_cat = 0
+            completadas_cat = 0
+            
+            # Contar peleas en la matriz de esta pestaña específica
+            for r in grid:
+                for node in r:
+                    if isinstance(node, dict) and node.get("tipo") == "combate":
+                        total_cat += 1
+                        if node.get("ganador"):
+                            completadas_cat += 1
+            
+            faltan_cat = total_cat - completadas_cat
+            
+            if total_cat == 0:
+                texto_lbl = "Sin combates"
+                color_lbl = "gray"
+            elif faltan_cat == 0:
+                texto_lbl = f"Peleas Totales: {total_cat}  |  Categoría Finalizada"
+                color_lbl = "#28a745" # Verde
+            else:
+                texto_lbl = f"Peleas: {total_cat}  |  Completadas: {completadas_cat}  |  Faltantes: {faltan_cat}"
+                color_lbl = "#17a2b8" # Azul
+
+            if hasattr(tab, 'lbl_estado_categoria'):
+                tab.lbl_estado_categoria.config(text=texto_lbl, foreground=color_lbl)
+                tab.lbl_estado_categoria.pack(side="right", padx=10)
+
         else:
             if llave_key in self.divisiones_bloqueadas:
-                self.modo_edicion = False
                 # Llave confirmada: Solo aparece confirmar todas a la derecha
                 if hasattr(tab, 'btn_confirmar_todas'): tab.btn_confirmar_todas.pack(side="right", padx=10)
             else:
-                self.modo_edicion = True
                 # Llave abierta: Aparece confirmar a la derecha, y a su izquierda confirmar todas
                 if hasattr(tab, 'btn_confirmar'): tab.btn_confirmar.pack(side="right", padx=10)
                 if hasattr(tab, 'btn_confirmar_todas'): tab.btn_confirmar_todas.pack(side="right", padx=5)
 
-        self.dibujar_llave(tab.canvas, self.llaves_generadas[llave_key], llave_key)
         self.gestionar_botones_globales()
         
     def generar_pareo_optimo(self, atletas):
@@ -881,18 +935,24 @@ class PantallaPareo(ttk.Frame):
                 right = grid[r][2*k+1]
 
                 if left is not None and left != "SKIP" and right is not None and right != "SKIP":
-                    match_id = f"R{r+1}_M{k}" # <-- CREA UN ID ÚNICO PARA EL COMBATE
-                    
-                    # Busca en la memoria si este combate ya se jugó y tiene ganador
+                    match_id = f"R{r+1}_M{k}" 
                     ganador_guardado = self.resultados_combates.get(llave_key, {}).get(match_id)
                     
+                    # --- AUTO-AVANCE VISUAL ---
+                    p_rojo = self.obtener_peleador_real(left)
+                    p_azul = self.obtener_peleador_real(right)
+                    
+                    if not ganador_guardado and p_rojo and p_azul:
+                        if p_rojo.get("id") == -1 and p_azul.get("id") != -1:
+                            ganador_guardado = p_azul.copy(); ganador_guardado["motivo_victoria"] = "VFO - Op. Descalificado"
+                        elif p_azul.get("id") == -1 and p_rojo.get("id") != -1:
+                            ganador_guardado = p_rojo.copy(); ganador_guardado["motivo_victoria"] = "VFO - Op. Descalificado"
+                        elif p_rojo.get("id") == -1 and p_azul.get("id") == -1:
+                            ganador_guardado = {"id": -1, "nombre": "Doble Descalificación", "club": "---", "ciudad": "---", "motivo_victoria": "2DSQ"}
+                    
                     next_r.append({
-                        "tipo": "combate",
-                        "ronda": r + 1,
-                        "match_id": match_id, # <- SE GUARDA AQUÍ
-                        "peleador_rojo": left, 
-                        "peleador_azul": right, 
-                        "ganador": ganador_guardado # <- EL SISTEMA ES INTELIGENTE AHORA
+                        "tipo": "combate", "ronda": r + 1, "match_id": match_id, 
+                        "peleador_rojo": left, "peleador_azul": right, "ganador": ganador_guardado
                     })
                 elif left is not None and left != "SKIP":
                     grid[r][2*k] = "SKIP" 
@@ -936,12 +996,11 @@ class PantallaPareo(ttk.Frame):
                     else:
                         # Si SÍ está bloqueado
                         if ganador:
-                            # 1. Tiene Ganador: Escribe el nombre y hereda el tooltip de Atleta
-                            canvas.create_text(x + 10, y, text=ganador['nombre'], fill="white", anchor="w", font=("Helvetica", 9))
-                            ciudad = ganador.get('ciudad', 'No especificada')
-                            motivo = ganador.get('motivo_victoria', 'No especificado')
-                            texto_tooltip = f"Atleta: {ganador['nombre']}\nClub: {ganador['club']}\nCiudad: {ciudad}\nID: {ganador['id']}"
-                            canvas.zonas_tooltip.append((x, box_y1, x + box_w, box_y2, texto_tooltip))
+                            color_texto = "#ff4d4d" if ganador['id'] == -1 else "white"
+                            font_w = "bold" if ganador['id'] == -1 else "normal"
+                            texto_mostrar = "Doble Descalificación" if ganador['id'] == -1 else ganador['nombre']
+                            
+                            canvas.create_text(x + 10, y, text=texto_mostrar, fill=color_texto, anchor="w", font=("Helvetica", 9, font_w))
                         
                         # 2. Hace clicable SOLO si le precede al menos 1 atleta
                         if p_rojo is not None or p_azul is not None:
@@ -1030,40 +1089,58 @@ class PantallaPareo(ttk.Frame):
             clic_en_combate = False
             for (x1, y1, x2, y2, match_node) in getattr(canvas, 'combates_clickable', []):
                 if x1 <= x <= x2 and y1 <= y <= y2:
-                    x_root = canvas.winfo_rootx() + x1 - canvas.canvasx(0)
-                    y_root = canvas.winfo_rooty() + y2 - canvas.canvasy(0)
-                    self.abrir_ventana_combate(match_node, tab, x_root, y_root, llave_key)
+                    # --- CAMBIO: Pasamos las coordenadas x1 y y2 del Canvas directamente ---
+                    self.abrir_ventana_combate(match_node, tab, x1, y2, llave_key)
                     clic_en_combate = True
                     break
             
-            # --- NUEVO: Si hizo clic en un espacio vacío del canvas, se cierra el panel ---
-            if not clic_en_combate and hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
-                self.panel_combate.destroy()
+            # Si hizo clic en un espacio vacío del canvas, se cierra el panel
+            if not clic_en_combate:
+                self.cerrar_panel_combate() # <-- NUEVO (Y borra todo lo que habías puesto del scroll aquí)
 
-    def abrir_ventana_combate(self, match_node, tab, x_root, y_root, llave_key):
+    def cerrar_panel_combate(self):
+        """Cierra el panel incrustado, elimina el contenedor del canvas y restaura el scroll."""
+        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
+            self.panel_combate.destroy()
+            
+        if hasattr(self, "id_ventana_canvas") and hasattr(self, "canvas_panel_actual"):
+            try:
+                # 1. Eliminar el "hueco fantasma" del Canvas
+                self.canvas_panel_actual.delete(self.id_ventana_canvas)
+                self.canvas_panel_actual.update_idletasks()
+                
+                # 2. Recalcular el tamaño del scroll (ahora sí encogerá)
+                bbox = self.canvas_panel_actual.bbox("all")
+                if bbox:
+                    self.canvas_panel_actual.config(scrollregion=(bbox[0] - 60, bbox[1] - 60, bbox[2] + 60, bbox[3] + 60))
+            except Exception:
+                pass
+            
+            # Limpiar referencias
+            self.id_ventana_canvas = None
+            self.canvas_panel_actual = None
+
+    def abrir_ventana_combate(self, match_node, tab, x_canvas, y_canvas, llave_key):
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         
-        # Destruir un panel anterior si el usuario hace clic en otro lado
-        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
-            self.panel_combate.destroy()
+        self.cerrar_panel_combate() # Limpiar panel previo
+        self.canvas_panel_actual = tab.canvas # Guardar referencia del canvas actual
 
-        # Crear panel flotante sin decoraciones de Windows
-        self.panel_combate = tk.Toplevel(self)
-        self.panel_combate.wm_overrideredirect(True) 
-        self.panel_combate.configure(bg="#2d2d2d", highlightbackground="gray", highlightthickness=1)
+        # --- SOLUCIÓN: CREAR EL PANEL COMO UN ELEMENTO INTERNO DEL CANVAS ---
+        self.panel_combate = tk.Frame(tab.canvas, bg="#2d2d2d", highlightbackground="gray", highlightthickness=1)
         
-        # Ubicar exactamente 5 píxeles por debajo de la caja de combate
-        self.panel_combate.geometry(f"+{int(x_root)}+{int(y_root + 5)}")
+        # Incrustarlo matemáticamente en el lienzo (se desplazará con el scroll y será tapado por los bordes)
+        self.id_ventana_canvas = tab.canvas.create_window(x_canvas, y_canvas + 5, window=self.panel_combate, anchor="nw")
         
         # --- NUEVO ENCABEZADO (SIN LA X) ---
         top_bar = tk.Frame(self.panel_combate, bg="#1e1e1e")
         top_bar.pack(fill="x")
         
-        # El título ahora está centrado automáticamente (quitamos side="left")
+        # El título ahora está centrado automáticamente
         ttk.Label(top_bar, text=f"Detalles del Combate (Ronda {match_node['ronda']})", font=("Helvetica", 10, "bold"), background="#1e1e1e", foreground="white").pack(pady=5)
         
-        # --- CUERPO DEL PANEL ---
+        # --- CUERPO DEL PANEL (El resto de tu código sigue igual a partir de aquí) ---
         main_frame = ttk.Frame(self.panel_combate, padding=10)
         main_frame.pack(fill="both", expand=True)
         
@@ -1094,11 +1171,24 @@ class PantallaPareo(ttk.Frame):
         btn_frame.pack(pady=(10, 0))
         
         if match_node.get("ganador") is not None:
-            ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
+            ganador_id = match_node["ganador"].get("id")
+            motivo = match_node["ganador"].get("motivo_victoria", "")
+            
+            # 1. Bloquear edición si fue DSQ
+            if ganador_id == -1 or "DSQ" in motivo:
+                ttk.Label(btn_frame, text="Combate cerrado por Descalificación", foreground="#dc3545", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
+            # 2. NUEVO: Bloquear edición si el torneo ya se cerró
+            elif getattr(self, "torneo_cerrado_en_db", False):
+                ttk.Label(btn_frame, text="Torneo Finalizado (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
+            # 3. Si no hay bloqueos, permitir editar
+            else:
+                ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
+                
             estilo_ext, peso_ext = llave_key.split("-")
-            ttk.Button(btn_frame, text="📄 PDF", command=lambda: self.exportar_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+            # 4. NUEVO: Botón de previsualización de datos
+            ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: self.abrir_previsualizacion_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+            
         elif p_rojo is not None and p_azul is not None:
-            # --- NUEVA REGLA: Validar cierre de todas las llaves ---
             total_divisiones = sum(len(pesos) for pesos in self.datos.values())
             if len(self.divisiones_bloqueadas) >= total_divisiones:
                 ttk.Button(btn_frame, text="Iniciar Pelea", command=lambda: self.iniciar_pelea(match_node, tab, llave_key)).pack()
@@ -1108,6 +1198,149 @@ class PantallaPareo(ttk.Frame):
                 lbl_aviso.pack()
         else:
             ttk.Label(btn_frame, text="Esperando clasificado...", font=("Helvetica", 9, "italic")).pack()
+
+        # --- EXPANSIÓN DE SCROLL Y AUTO-DESPLAZAMIENTO AJUSTADO ---
+        self.panel_combate.update_idletasks() 
+        
+        bbox = tab.canvas.bbox("all")
+        if bbox:
+            # bbox[3] ya incluye la altura del panel. Redujimos el margen extra inferior de 60 a solo 15
+            min_x, min_y, max_x, max_y = bbox[0] - 60, bbox[1] - 60, bbox[2] + 60, bbox[3] + 15
+            tab.canvas.config(scrollregion=(min_x, min_y, max_x, max_y))
+            
+            altura_visible = tab.canvas.winfo_height()
+            coord_fondo_panel = y_canvas + 5 + self.panel_combate.winfo_height() + 15 # Margen más apretado
+            coord_fondo_actual = tab.canvas.canvasy(altura_visible)
+            
+            if coord_fondo_panel > coord_fondo_actual:
+                altura_total = max_y - min_y
+                nueva_fraccion = (coord_fondo_panel - altura_visible - min_y) / altura_total
+                tab.canvas.yview_moveto(nueva_fraccion)
+
+    def abrir_previsualizacion_pdf(self, match_node, estilo, peso):
+        p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
+        p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
+        ganador_data = match_node.get("ganador", {})
+        id_combate = ganador_data.get("id_combate")
+
+        if not id_combate:
+            return messagebox.showerror("Error", "No se encontró el ID del combate en BD.")
+
+        # Recopilar información faltante para el acta
+        torneo_nombre = "Torneo"
+        torneo_fecha = "--/--/----"
+        hora_fin_combate = "--:--"
+        conexion = self.db.conectar()
+        if conexion:
+            try:
+                with conexion.cursor() as cur:
+                    cur.execute("""
+                        SELECT t.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY'), to_char(c.hora_fin, 'HH24:MI')
+                        FROM combate c
+                        JOIN torneo_division td ON c.id_torneo_division = td.id
+                        JOIN torneo t ON td.id_torneo = t.id
+                        WHERE c.id = %s
+                    """, (id_combate,))
+                    res = cur.fetchone()
+                    if res: torneo_nombre, torneo_fecha, hora_fin_combate = res
+            except Exception as e: pass
+            finally: conexion.close()
+
+        oficiales_db = self.db.obtener_oficiales()
+        dict_oficiales = {o['id']: f"{o['apellidos']}, {o['nombre']}" for o in oficiales_db}
+        nom_arbitro = dict_oficiales.get(ganador_data.get("id_arbitro"), "N/A")
+        nom_juez = dict_oficiales.get(ganador_data.get("id_juez"), "N/A")
+        nom_jefe = dict_oficiales.get(ganador_data.get("id_jefe_tapiz"), "N/A")
+
+        puntos_historicos = self.db.obtener_puntuacion_combate(id_combate)
+
+        # Construir Ventana de Previsualización
+        prev_win = tk.Toplevel(self)
+        prev_win.title("Previsualización de Acta Oficial")
+        prev_win.geometry("650x650")
+        prev_win.transient(self)
+        prev_win.grab_set()
+
+        titulo_font = ("Helvetica", 14, "bold")
+        sub_font = ("Helvetica", 10, "bold")
+        norm_font = ("Helvetica", 10)
+
+        # Encabezado
+        ttk.Label(prev_win, text=torneo_nombre.upper(), font=titulo_font).pack(pady=(15, 5))
+        ttk.Label(prev_win, text=f"{torneo_fecha}  |  {estilo} - {peso}  |  Ronda {match_node['ronda']}", font=norm_font).pack()
+
+        # Oficiales
+        frame_of = ttk.LabelFrame(prev_win, text="Cuerpo Arbitral", padding=10)
+        frame_of.pack(fill="x", padx=20, pady=10)
+        ttk.Label(frame_of, text=f"Árbitro: {nom_arbitro}", font=norm_font).grid(row=0, column=0, sticky="w", padx=5)
+        ttk.Label(frame_of, text=f"Juez: {nom_juez}", font=norm_font).grid(row=0, column=1, sticky="w", padx=20)
+        ttk.Label(frame_of, text=f"Jefe de Tapiz: {nom_jefe}", font=norm_font).grid(row=0, column=2, sticky="w", padx=5)
+
+        # Atletas
+        frame_atl = ttk.Frame(prev_win)
+        frame_atl.pack(fill="x", padx=20, pady=5)
+        frame_atl.columnconfigure(0, weight=1); frame_atl.columnconfigure(1, weight=1)
+
+        lbl_rojo = tk.Label(frame_atl, text=f"{p_rojo['nombre']}\n{p_rojo['club']}", bg="#cc0000", fg="white", font=sub_font, height=3)
+        lbl_rojo.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        lbl_azul = tk.Label(frame_atl, text=f"{p_azul['nombre']}\n{p_azul['club']}", bg="#0000cc", fg="white", font=sub_font, height=3)
+        lbl_azul.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+
+        # Tabla de Puntos
+        frame_pts = ttk.LabelFrame(prev_win, text="Historial de Puntos Técnicos", padding=10)
+        frame_pts.pack(fill="both", expand=True, padx=20, pady=5)
+
+        tv_pts = ttk.Treeview(frame_pts, columns=("periodo", "esquina", "puntos", "tipo"), show="headings", height=6)
+        for col in tv_pts['columns']: tv_pts.heading(col, text=col.capitalize())
+        tv_pts.column("periodo", width=80, anchor="center"); tv_pts.column("esquina", width=100, anchor="center")
+        tv_pts.column("puntos", width=80, anchor="center"); tv_pts.column("tipo", width=150, anchor="center")
+        tv_pts.pack(fill="both", expand=True)
+
+        p1_r, p2_r, p1_a, p2_a = 0, 0, 0, 0
+        for pt in puntos_historicos:
+            val = pt['valor_puntos']
+            if pt['color_esquina'] == 'Rojo':
+                if pt['periodo'] == 1: p1_r += val
+                else: p2_r += val
+            else:
+                if pt['periodo'] == 1: p1_a += val
+                else: p2_a += val
+            tv_pts.insert("", "end", values=(pt['periodo'], pt['color_esquina'], val, pt['tipo_accion']))
+
+        # Resultado
+        frame_res = ttk.LabelFrame(prev_win, text="Resultado", padding=10)
+        frame_res.pack(fill="x", padx=20, pady=10)
+        
+        ttk.Label(frame_res, text=f"Marcador: Rojo {p1_r+p2_r} - {p1_a+p2_a} Azul", font=sub_font).pack(pady=2)
+        ttk.Label(frame_res, text=f"Ganador: {ganador_data.get('nombre', '')}", font=sub_font, foreground="#28a745").pack(pady=2)
+        ttk.Label(frame_res, text=f"Método: {ganador_data.get('motivo_victoria', '')}", font=norm_font).pack(pady=2)
+
+        # Botones de Acción Finales
+        btn_frame_inf = ttk.Frame(prev_win)
+        btn_frame_inf.pack(side="bottom", pady=15)
+
+        ttk.Button(btn_frame_inf, text="📄 Exportar PDF", command=lambda: [prev_win.destroy(), self.exportar_pdf(match_node, estilo, peso)]).pack(side="left", padx=10)
+        ttk.Button(btn_frame_inf, text="🖨️ Imprimir Acta", command=lambda: self.imprimir_combate(match_node, estilo, peso)).pack(side="left", padx=10)
+
+    def imprimir_combate(self, match_node, estilo, peso):
+        """Genera el PDF en una carpeta temporal y lo envía a imprimir."""
+        import tempfile
+        import time
+        
+        # Crear un archivo temporal
+        temp_dir = tempfile.gettempdir()
+        temp_file = os.path.join(temp_dir, f"impresion_combate_{match_node['match_id']}_{int(time.time())}.pdf")
+        
+        # Llamar a exportar_pdf silenciosamente pasándole la ruta directa
+        self.exportar_pdf(match_node, estilo, peso, ruta_directa=temp_file)
+        
+        # Enviar el comando al sistema operativo (Windows)
+        if os.path.exists(temp_file):
+            try:
+                os.startfile(temp_file, "print")
+                messagebox.showinfo("Imprimiendo", "El documento ha sido enviado a la cola de impresión.")
+            except Exception as e:
+                messagebox.showerror("Error de Impresión", f"No se pudo enviar a imprimir automáticamente.\n\nEl archivo se guardó en:\n{temp_file}\n\nDetalle del sistema: {e}")
 
     # ================= EXPORTACIÓN A PDF DESDE PAREO =================
     def exportar_pdf(self, match_node, estilo, peso, ruta_directa=None): # <-- NUEVOS PARÁMETROS
@@ -1334,9 +1567,7 @@ class PantallaPareo(ttk.Frame):
     def iniciar_pelea(self, match_node, tab, llave_key):
         from ventana_combate import VentanaCombate 
         
-        # Validar si el panel flotante existe antes de destruirlo
-        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
-            self.panel_combate.destroy() 
+        self.cerrar_panel_combate() # <-- NUEVO
             
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
@@ -1345,7 +1576,9 @@ class PantallaPareo(ttk.Frame):
 
     def editar_pelea(self, match_node, tab, llave_key): 
         from ventana_editar_pelea import VentanaEditarPelea
-        self.panel_combate.destroy()
+        
+        self.cerrar_panel_combate() # <-- NUEVO
+            
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         VentanaEditarPelea(self, match_node, p_rojo, p_azul, tab, llave_key, self.asignar_ganador)
@@ -1366,9 +1599,12 @@ class PantallaPareo(ttk.Frame):
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         
         if p_rojo and p_azul:
+            # Protegemos la Base de Datos: Si el ID es -1, pasamos None (NULL en SQL)
+            id_ganador_db = ganador['id'] if ganador['id'] != -1 else None
+            
             self.db.guardar_resultado_combate(
                 self.id_torneo, tab.estilo, tab.cmb_peso.get(), 
-                match_id, p_rojo['id'], p_azul['id'], ganador['id'], motivo,
+                match_id, p_rojo['id'], p_azul['id'], id_ganador_db, motivo,
                 id_arb, id_jue, id_jef, puntos_rojo, puntos_azul, historial
             )
         

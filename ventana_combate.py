@@ -27,6 +27,7 @@ class VentanaCombate(tk.Toplevel):
         self.tiempo_segundos = self.duracion_periodo
         self.timer_corriendo = False
         self.timer_id = None
+        self.tiempo_act_segundos = 0  # <-- NUEVO: Cronómetro de 30s ACT
         
         # Historial para Deshacer/Editar
         self.historial_acciones = []
@@ -164,64 +165,78 @@ class VentanaCombate(tk.Toplevel):
         center = tk.Frame(board, bg="#121212", width=160)
         center.pack(expand=True, fill="y")
         
-        frame_ajuste = tk.Frame(center, bg="#121212")
-        frame_ajuste.pack(pady=(20, 0))
-        tk.Button(frame_ajuste, text="-1 Min", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(-1)).pack(side="left", padx=5)
-        tk.Button(frame_ajuste, text="+1 Min", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(1)).pack(side="left", padx=5)
+        frame_ajuste_m = tk.Frame(center, bg="#121212")
+        frame_ajuste_m.pack(pady=(15, 0))
+        tk.Button(frame_ajuste_m, text="-1m", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(-60)).pack(side="left", padx=2)
+        tk.Button(frame_ajuste_m, text="+1m", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(60)).pack(side="left", padx=2)
+
+        frame_ajuste_s = tk.Frame(center, bg="#121212")
+        frame_ajuste_s.pack(pady=(2, 0))
+        tk.Button(frame_ajuste_s, text="-5s", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(-5)).pack(side="left", padx=2)
+        tk.Button(frame_ajuste_s, text="-1s", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(-1)).pack(side="left", padx=2)
+        tk.Button(frame_ajuste_s, text="+1s", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(1)).pack(side="left", padx=2)
+        tk.Button(frame_ajuste_s, text="+5s", font=("Helvetica", 8), command=lambda: self.modificar_tiempo(5)).pack(side="left", padx=2)
 
         self.lbl_reloj = tk.Label(center, fg="#ffcc00", bg="#121212", font=("Courier", 35, "bold"))
-        self.lbl_reloj.pack(pady=(5, 10))
+        self.lbl_reloj.pack(pady=(5, 0))
         
-        # --- CAMBIO: Guardamos la referencia para el control de fases ---
+        self.lbl_act = tk.Label(center, text="", fg="#17a2b8", bg="#121212", font=("Courier", 18, "bold"))
+        self.lbl_act.pack(pady=(0, 5))
+        
         self.btn_iniciar = tk.Button(center, text="▶ INICIAR", font=("Helvetica", 12, "bold"), bg="#28a745", fg="white", width=12, command=self.iniciar_cronometro)
         self.btn_iniciar.pack(pady=5)
 
         tk.Button(center, text="⏸ PAUSAR", font=("Helvetica", 12, "bold"), bg="#ffc107", fg="black", width=12, command=self.pausar_cronometro).pack(pady=5)
-        tk.Button(center, text="⏱ 30s ACT", font=("Helvetica", 10, "bold"), bg="#17a2b8", fg="white", width=14).pack(pady=(20, 5))
+        tk.Button(center, text="⏱ 30s ACT", font=("Helvetica", 10, "bold"), bg="#17a2b8", fg="white", width=14, command=self.iniciar_30s_act).pack(pady=(10, 5))
         
-        tk.Button(center, text="↩ DESHACER ÚLTIMO", font=("Helvetica", 9, "bold"), bg="gray", fg="white", width=18, command=self.deshacer_accion).pack(side="bottom", pady=20)
+        tk.Button(center, text="🚫 DOBLE DSQ", font=("Helvetica", 9, "bold"), bg="#8b0000", fg="white", width=18, command=self.declarar_doble_dsq).pack(side="bottom", pady=(5, 20))
+        tk.Button(center, text="↩ DESHACER ÚLTIMO", font=("Helvetica", 9, "bold"), bg="gray", fg="white", width=18, command=self.deshacer_accion).pack(side="bottom", pady=5)
 
     # ================= LÓGICA DE TIEMPO Y PERIODOS =================
     def actualizar_reloj_visual(self):
         mins, secs = divmod(self.tiempo_segundos, 60)
         self.lbl_reloj.config(text=f"{mins:02d}:{secs:02d}")
+        if hasattr(self, 'tiempo_act_segundos') and self.tiempo_act_segundos > 0:
+            self.lbl_act.config(text=f"ACT: {self.tiempo_act_segundos:02d}s")
+        else:
+            if hasattr(self, 'lbl_act'): self.lbl_act.config(text="")
 
-    def modificar_tiempo(self, minutos):
+    def modificar_tiempo(self, segundos):
         if not self.timer_corriendo:
-            
-            self.tiempo_segundos += (minutos * 60)
-            if self.tiempo_segundos < 0: 
-                self.tiempo_segundos = 0
-                
+            self.tiempo_segundos += segundos
+            if self.tiempo_segundos < 0: self.tiempo_segundos = 0
+            self.actualizar_reloj_visual()
+
+    def iniciar_30s_act(self):
+        if self.periodo_actual in (1, 2):
+            self.tiempo_act_segundos = 30
             self.actualizar_reloj_visual()
 
     def avanzar_fase(self):
-        """Lógica para saltar al siguiente periodo o descanso."""
+        self.tiempo_act_segundos = 0 # Detener ACT al cambiar fase
         if self.periodo_actual == 1:
-            # 1. Pasa del Periodo 1 al Descanso
-            self.periodo_actual = 0
-            self.tiempo_segundos = 30 # Descanso estricto de 30s
+            self.periodo_actual = 0; self.tiempo_segundos = 30
             self.lbl_estado_periodo.config(text="DESCANSO", fg="#ff4d4d")
             self.lbl_reloj.config(fg="#ff4d4d")
-            self.actualizar_reloj_visual()
-            
-            # --- Limpiar los recuadritos de puntuación del P1 ---
             for widget in self.log_rojo.winfo_children(): widget.pack_forget()
             for widget in self.log_azul.winfo_children(): widget.pack_forget()
-            
         elif self.periodo_actual == 0:
-            # 2. Pasa del Descanso al Periodo 2
-            self.periodo_actual = 2
-            self.tiempo_segundos = self.duracion_periodo # Regresa a 3 mins (o lo modificado)
+            self.periodo_actual = 2; self.tiempo_segundos = self.duracion_periodo
             self.lbl_estado_periodo.config(text="PERIODO 2", fg="#ffcc00")
             self.lbl_reloj.config(fg="#ffcc00")
-            self.actualizar_reloj_visual()
-            
         elif self.periodo_actual == 2:
-            # 3. Fin de la partida por tiempo
             self.periodo_actual = 3
             self.lbl_estado_periodo.config(text="FIN DEL COMBATE", fg="#00ccff")
+        self.actualizar_reloj_visual()
+
+    def bucle_cronometro(self):
+        if self.timer_corriendo and self.tiempo_segundos > 0:
+            self.tiempo_segundos -= 1
+            if hasattr(self, 'tiempo_act_segundos') and self.tiempo_act_segundos > 0:
+                self.tiempo_act_segundos -= 1
             self.actualizar_reloj_visual()
+            if self.tiempo_segundos <= 0: self.timer_corriendo = False 
+            else: self.timer_id = self.after(1000, self.bucle_cronometro)
 
     def iniciar_cronometro(self):
         if self.periodo_actual == 3: return # Combate finalizado
@@ -245,16 +260,7 @@ class VentanaCombate(tk.Toplevel):
         if self.timer_id:
             self.after_cancel(self.timer_id)
             self.timer_id = None
-
-    def bucle_cronometro(self):
-        if self.timer_corriendo and self.tiempo_segundos > 0:
-            self.tiempo_segundos -= 1
-            self.actualizar_reloj_visual()
-            
-            if self.tiempo_segundos <= 0:
-                self.timer_corriendo = False # El reloj se detiene y espera clic manual
-            else:
-                self.timer_id = self.after(1000, self.bucle_cronometro)
+            self.tiempo_act_segundos = 0  # <-- NUEVO: Cronómetro de 30s ACT
 
     # ================= MATEMÁTICAS CENTRALES DE PUNTUACIÓN =================
     def ajustar_puntuacion(self, esquina, periodo, cantidad):
@@ -395,3 +401,20 @@ class VentanaCombate(tk.Toplevel):
             self.destroy() 
             
         ttk.Button(dialogo, text="Confirmar y Finalizar", command=confirmar).pack(pady=15)
+
+    def declarar_doble_dsq(self):
+        if messagebox.askyesno("Doble Descalificación", "¿Declarar Doble Descalificación (2DSQ)?\n\nAmbos atletas serán eliminados del torneo. El próximo oponente avanzará por incomparecencia."):
+            self.pausar_cronometro()
+            
+            ganador_dsq = {"id": -1, "nombre": "Doble Descalificación", "club": "---", "ciudad": "---"}
+            motivo = "DSQ - Doble Descalificación"
+            
+            id_arb = self.oficiales_db[self.cmb_arbitro.current()]['id'] if self.cmb_arbitro.current() != -1 else None
+            id_jue = self.oficiales_db[self.cmb_juez.current()]['id'] if self.cmb_juez.current() != -1 else None
+            id_jef = self.oficiales_db[self.cmb_jefe.current()]['id'] if self.cmb_jefe.current() != -1 else None
+            
+            historial_limpio = [{'esquina': acc['esquina'], 'puntos': acc['puntos'], 'periodo': acc['periodo'], 'is_p': acc['is_p'], 'orden': i + 1} for i, acc in enumerate(self.historial_acciones)]
+            totales = {'rojo': self.score_rojo.get(), 'azul': self.score_azul.get()}
+            
+            self.callback_ganador(self.match_node['match_id'], ganador_dsq, motivo, id_arb, id_jue, id_jef, historial_limpio, totales)
+            self.destroy()
