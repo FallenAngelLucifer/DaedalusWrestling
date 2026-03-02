@@ -101,8 +101,9 @@ class PantallaInscripcion(ttk.Frame):
         self.cmb_atleta.bind("<<ComboboxSelected>>", self.al_seleccionar_atleta)
         self.cmb_atleta.bind("<KeyRelease>", self.al_seleccionar_atleta, add="+")
 
-        self.btn_nuevo_atleta = ttk.Button(self.form_frame, text="+ Gestión BD Atletas", command=self.abrir_ventana_nuevo)
-        self.btn_nuevo_atleta.grid(row=0, column=2, sticky="w", padx=5)
+        # --- CAMBIO 1: Botón de "Añadir a Memoria" sube aquí ---
+        self.btn_agregar = ttk.Button(self.form_frame, text="Añadir a Memoria", command=self.agregar_a_memoria)
+        self.btn_agregar.grid(row=0, column=2, sticky="w", padx=5)
 
         # --- SUSTITUIR EL ENTRY ANTIGUO POR ESTO ---
         vcmd_peso = (self.register(self.validar_peso), '%P')
@@ -113,7 +114,6 @@ class PantallaInscripcion(ttk.Frame):
         frame_peso_dinamico.grid(row=1, column=1, columnspan=2, sticky="w", pady=5, padx=5)
         
         self.var_peso = tk.StringVar()
-        # Escucha cada tecla que se presiona para actualizar la etiqueta en vivo
         self.var_peso.trace_add("write", lambda *args: self.actualizar_categoria_dinamica())
         
         self.ent_peso = ttk.Spinbox(frame_peso_dinamico, from_=20.0, to=150.0, increment=0.1, width=10, 
@@ -136,8 +136,10 @@ class PantallaInscripcion(ttk.Frame):
         botones_form_frame = ttk.Frame(self.form_frame)
         botones_form_frame.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="w", padx=5)
 
-        self.btn_agregar = ttk.Button(botones_form_frame, text="Añadir a Memoria", command=self.agregar_a_memoria)
-        self.btn_agregar.pack(side="left", padx=(0, 5))
+        # --- CAMBIO 1: Botón de "Gestión BD Atletas" baja aquí ---
+        self.btn_nuevo_atleta = ttk.Button(botones_form_frame, text="+ Gestión BD Atletas", command=self.abrir_ventana_nuevo)
+        self.btn_nuevo_atleta.pack(side="left", padx=(0, 5))
+        
         self.btn_cancelar_edicion = ttk.Button(botones_form_frame, text="Cancelar Edición", command=self.cancelar_edicion)
 
         # --- NUEVO PANEL DE BÚSQUEDA Y FILTROS OPTIMIZADO (Derecha) ---
@@ -249,30 +251,55 @@ class PantallaInscripcion(ttk.Frame):
         tabla_frame = ttk.LabelFrame(self, text="3. Atletas en Memoria (Pendientes de Subir)", padding=10)
         tabla_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
+        # --- 1. FALSO ENCABEZADO (Modo Oscuro sin afectar el tema global) ---
+        header_frame = tk.Frame(tabla_frame, height=25)
+        header_frame.pack(fill="x")
+        header_frame.pack_propagate(False) # Congela la altura
+
+        def crear_celda(texto, ancho):
+            celda = tk.Frame(header_frame, width=ancho, bg="#2a2a2a", highlightbackground="#555555", highlightthickness=1)
+            celda.pack(side="left", fill="y")
+            celda.pack_propagate(False)
+            tk.Label(celda, text=texto, bg="#2a2a2a", fg="white", font=("Helvetica", 9, "bold")).pack(expand=True)
+
+        # Se usan los mismos anchos de tus columnas originales
+        crear_celda("ID BD", 50)
+        crear_celda("Atleta", 180)
+        crear_celda("Sexo", 50)
+        crear_celda("Club", 150)
+        crear_celda("Ciudad", 150)
+        crear_celda("Peso Dado", 110)
+        crear_celda("Peso Oficial", 110)
+
+        # --- SOLUCIÓN: Eliminamos el "filler" y hacemos que el encabezado "Estilos" se expanda ---
+        celda_estilos = tk.Frame(header_frame, bg="#2a2a2a", highlightbackground="#555555", highlightthickness=1)
+        celda_estilos.pack(side="left", fill="both", expand=True) # expand=True llena el vacío
+        tk.Label(celda_estilos, text="Estilos", bg="#2a2a2a", fg="white", font=("Helvetica", 9, "bold")).pack(expand=True)
+
+        # --- 2. TABLA SIN ENCABEZADOS NATIVOS ---
         columnas = ("id", "idx_local", "atleta", "sexo", "club", "ciudad", "peso", "peso_oficial", "estilos")
-        self.tabla = ttk.Treeview(tabla_frame, columns=columnas, show="headings", height=6)
+        self.tabla = ttk.Treeview(tabla_frame, columns=columnas, show="", height=6)
         
-        self.tabla.heading("id", text="ID BD")
-        self.tabla.heading("idx_local", text="Idx") 
-        self.tabla.heading("atleta", text="Atleta")
-        self.tabla.heading("sexo", text="Sexo")
-        self.tabla.heading("club", text="Club")
-        self.tabla.heading("ciudad", text="Ciudad")
-        self.tabla.heading("peso", text="Peso Dado")
-        self.tabla.heading("peso_oficial", text="Peso Oficial")
-        self.tabla.heading("estilos", text="Estilos")
+        # Ocultar la columna fantasma izquierda
+        self.tabla.column("#0", width=0, stretch=tk.NO)
         
-        self.tabla.column("id", width=45, anchor="center") 
+        # Columnas fijas para que no se descuadren
+        self.tabla.column("id", width=50, anchor="center", stretch=False) 
         self.tabla.column("idx_local", width=0, stretch=tk.NO) 
-        self.tabla.column("atleta", width=180, anchor="w")
-        self.tabla.column("sexo", width=40, anchor="center")
-        self.tabla.column("club", width=120, anchor="w")
-        self.tabla.column("ciudad", width=90, anchor="w")
-        self.tabla.column("peso", width=70, anchor="center")
-        self.tabla.column("peso_oficial", width=110, anchor="center")
-        self.tabla.column("estilos", width=140, anchor="w")
+        self.tabla.column("atleta", width=180, anchor="w", stretch=False)
+        self.tabla.column("sexo", width=50, anchor="center", stretch=False)
+        self.tabla.column("club", width=150, anchor="w", stretch=False)
+        self.tabla.column("ciudad", width=150, anchor="w", stretch=False)
+        self.tabla.column("peso", width=110, anchor="center", stretch=False)
+        self.tabla.column("peso_oficial", width=110, anchor="center", stretch=False)
+        
+        # --- SOLUCIÓN: La última columna se estira (stretch=True) para acompañar al encabezado ---
+        self.tabla.column("estilos", width=140, anchor="w", stretch=True)
         
         self.tabla.pack(side="top", fill="both", expand=True)
+        
+        # Tag para pintar en rojo a los descalificados
+        self.tabla.tag_configure("dsq", foreground="#dc3545")
 
         btn_box = ttk.Frame(tabla_frame)
         btn_box.pack(fill="x", pady=5)
@@ -300,8 +327,9 @@ class PantallaInscripcion(ttk.Frame):
 
         self.cambiar_estado_inscripcion("disabled")
         
-        # --- NUEVO EVENTO: Escuchar selección de tabla ---
+        # --- NUEVOS EVENTOS: Escuchar selección y Doble Clic ---
         self.tabla.bind("<<TreeviewSelect>>", self.al_seleccionar_tabla)
+        self.tabla.bind("<Double-1>", self.on_double_click_tabla) # <-- AÑADIR ESTA LÍNEA
 
         self.actualizar_botones_guardado()
 
@@ -423,16 +451,30 @@ class PantallaInscripcion(ttk.Frame):
         ins_data = next((i for i in self.inscripciones_memoria if i['id_atleta'] == id_atleta), None)
         if not ins_data: return
         
-        # Validar si este atleta pertenece a una llave bloqueada
+        # Validar si este atleta pertenece a una llave bloqueada o está descalificado
         is_locked = any(div_id in getattr(self, "pesos_bloqueados_ids", set()) for div_id in ins_data['ids_divisiones'])
+        is_dsq = id_atleta in getattr(self, "atletas_descalificados_ids", set())
         
         # Activar/Desactivar según su estado
-        if is_locked:
+        if is_locked or is_dsq:
             self.btn_editar_memoria.config(state="disabled")
             self.btn_eliminar_memoria.config(state="disabled")
         else:
             self.btn_editar_memoria.config(state="normal")
             self.btn_eliminar_memoria.config(state="normal")
+
+    def on_double_click_tabla(self, event):
+        """Si se hace doble clic sobre una fila, evalúa si el atleta puede ser editado automáticamente."""
+        # 1. Usar identify_row es 100% preciso basándose en la coordenada Y del ratón
+        item_clickeado = self.tabla.identify_row(event.y)
+        
+        # Si no detecta ninguna fila (hizo clic en lo blanco), no hace nada
+        if not item_clickeado: 
+            return
+            
+        # 2. Forzamos la lectura del estado a string para evitar falsos negativos de Tkinter
+        if str(self.btn_editar_memoria.cget("state")) == "normal":
+            self.cargar_para_editar()
 
     def actualizar_btn_nuevo_limpiar(self):
         """Evalúa el estado del formulario para mostrar, ocultar o cambiar el botón inteligente."""
@@ -905,8 +947,14 @@ class PantallaInscripcion(ttk.Frame):
                 if tipo == "Club" and term not in club.lower(): continue
                 if tipo == "Ciudad" and term not in ciudad.lower(): continue
 
+            # --- NUEVO: Etiquetas visuales para atletas descalificados ---
+            is_dsq = id_atl in getattr(self, "atletas_descalificados_ids", set())
+            tags = ("dsq",) if is_dsq else ()
+
             fila_valores = (id_atl, 0, nombre_completo, info['sexo'], club, ciudad, ins['peso'], ins['peso_oficial'], " + ".join(ins['estilos']))
-            self.tabla.insert("", "end", values=fila_valores)
+            
+            # Pasamos los tags a la inserción
+            self.tabla.insert("", "end", values=fila_valores, tags=tags)
             
             # --- ACTUALIZAR CONTADORES ---
             total_atletas += 1
@@ -915,7 +963,7 @@ class PantallaInscripcion(ttk.Frame):
 
         # Actualizar la etiqueta (Color basado en el estado del torneo: Rojo si está cerrado, Verde si es editable)
         if hasattr(self, 'lbl_estadisticas'):
-            color_estado = "#dc3545" if getattr(self, "todo_bloqueado", False) else "#28a745"
+            color_estado = "#6f42c1" if getattr(self, "todo_bloqueado", False) else "#28a745"
             self.lbl_estadisticas.config(text=f"Atletas: {total_atletas}  |  Clubes: {len(clubes_unicos)}  |  Ciudades: {len(ciudades_unicas)}", foreground=color_estado)
             
         # Al refrescar/filtrar la tabla se pierde la selección, desactivar botones
@@ -1234,6 +1282,9 @@ class PantallaInscripcion(ttk.Frame):
         # Consultar la BD por llaves cerradas antes de configurar la interfaz
         self.pesos_bloqueados_ids = self.db.obtener_divisiones_bloqueadas(id_torneo)
 
+        # --- NUEVO: Cargar a los descalificados inmediatamente al abrir el torneo ---
+        self.atletas_descalificados_ids = self.db.obtener_peleadores_descalificados(id_torneo)
+
         # Bloquear Textos
         self.ent_tor_nombre.config(state="disabled")
         self.ent_tor_lugar.config(state="disabled")
@@ -1300,8 +1351,9 @@ class PantallaInscripcion(ttk.Frame):
             finally: 
                 conexion.close()
 
-        # 2. Consultar qué llaves están bloqueadas ahora
+        # 2. Consultar qué llaves están bloqueadas ahora y quiénes fueron descalificados
         self.pesos_bloqueados_ids = self.db.obtener_divisiones_bloqueadas(self.torneo_debug_id)
+        self.atletas_descalificados_ids = self.db.obtener_peleadores_descalificados(self.torneo_debug_id) # <-- NUEVO
 
         # 3. Evaluar si TODAS las divisiones están bloqueadas
         all_locked = True

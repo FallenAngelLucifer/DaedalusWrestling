@@ -130,7 +130,8 @@ class PantallaPareo(ttk.Frame):
         faltan = total_peleas - completadas
         
         if faltan == 0:
-            self.lbl_estado_torneo.config(text=f"Peleas: {total_peleas} | Completadas: {completadas} | Faltan: 0 | Listo para Cerrar", foreground="#28a745")
+            texto_listo = f"Torneo Finalizado - Listo para Cerrar\nPeleas: {total_peleas}  |  Completadas: {completadas}  |  Faltantes: 0"
+            self.lbl_estado_torneo.config(text=texto_listo, foreground="#28a745", justify="right")
         else:
             # Encontrar la ronda más baja en la que hay peleas pendientes
             ronda_actual = min(p["ronda"] for p in pendientes)
@@ -139,7 +140,7 @@ class PantallaPareo(ttk.Frame):
             # Buscar el bracket más grande involucrado para darle nombre a la fase
             max_dist = max(p["distancia"] for p in pendientes if p["ronda"] == ronda_actual)
             
-            # --- NUEVO: Calcular rondas totales faltantes en todo el torneo ---
+            # Calcular rondas totales faltantes en todo el torneo
             rondas_faltantes = max(p["distancia"] for p in pendientes) + 1
             
             if max_dist == 0: nombre_fase = "Finales"
@@ -148,9 +149,12 @@ class PantallaPareo(ttk.Frame):
             elif max_dist == 3: nombre_fase = "Octavos de final"
             else: nombre_fase = "Eliminatorias"
             
-            # --- NUEVO: Añadido "Rondas Faltantes" a la cadena de texto ---
-            texto = f"Peleas: {total_peleas} | Completadas: {completadas} | Faltan: {faltan}  |  Rondas Faltantes: {rondas_faltantes}  |  Fase: {nombre_fase} (Ronda {ronda_actual}, {restantes_ronda} restantes)"
-            self.lbl_estado_torneo.config(text=texto, foreground="#17a2b8")
+            # --- NUEVO: Texto dividido en dos líneas y justificado a la derecha ---
+            linea_rondas = f"Fase: {nombre_fase} (Ronda {ronda_actual}, {restantes_ronda} restantes)  |  Rondas Faltantes: {rondas_faltantes}"
+            linea_peleas = f"Peleas Totales: {total_peleas}  |  Completadas: {completadas}  |  Faltantes: {faltan}"
+            
+            texto = f"{linea_rondas}\n{linea_peleas}"
+            self.lbl_estado_torneo.config(text=texto, foreground="#17a2b8", justify="right")
 
     def exportar_todas_las_fichas_pdf(self):
         """Exporta todas las hojas de anotación de combates finalizados a una carpeta."""
@@ -518,56 +522,235 @@ class PantallaPareo(ttk.Frame):
 
     # ================= SISTEMA DE CARTELERA (ORDEN DE COMBATES) =================
     def construir_interfaz_cartelera(self):
-        lbl = ttk.Label(self.tab_cartelera, text="Orden de Combates Sugerido (Por Fases)", font=("Helvetica", 12, "bold"))
-        lbl.pack(pady=(0, 5))
+        # --- 1. TÍTULO DINÁMICO (Guardamos la referencia) ---
+        self.lbl_titulo_cartelera = ttk.Label(self.tab_cartelera, text="Orden de Combates Sugerido (Por Fases)", font=("Helvetica", 12, "bold"))
+        self.lbl_titulo_cartelera.pack(pady=(0, 5))
 
-        frame_controles = ttk.Frame(self.tab_cartelera)
-        frame_controles.pack(fill="x", pady=5)
+        # --- 2. CONTENEDOR DE CABECERA (Alterna entre Modos) ---
+        self.header_cartelera = ttk.Frame(self.tab_cartelera)
+        self.header_cartelera.pack(fill="x", pady=5)
+
+        # ================= MODO 1: ORDENAMIENTO (Por defecto) =================
+        self.frame_orden = ttk.Frame(self.header_cartelera)
+        self.frame_orden.pack(side="left", fill="x", expand=True)
         
-        ttk.Label(frame_controles, text="Modo de Ordenamiento:").pack(side="left", padx=5)
-        self.combo_orden_cartelera = ComboBuscador(frame_controles, values=[
+        ttk.Label(self.frame_orden, text="Modo de Ordenamiento:").pack(side="left", padx=5)
+        self.combo_orden_cartelera = ComboBuscador(self.frame_orden, values=[
             "Por Rounds (Mezclando estilos por fase y peso)", 
             "Prioridad Femenina (Terminar estilo femenino primero)"
         ], state="readonly", width=50)
         self.combo_orden_cartelera.set("Por Rounds (Mezclando estilos por fase y peso)")
         self.combo_orden_cartelera.pack(side="left", padx=5)
         
-        # Al cambiar la opción, se re-calcula la tabla al instante
         self.combo_orden_cartelera.bind("<<ComboboxSelected>>", lambda e: self.actualizar_cartelera())
 
+        # ================= MODO 2: HISTORIAL (Oculto al inicio) =================
+        self.frame_historial = ttk.Frame(self.header_cartelera)
+        
+        # Estadísticas alineadas a la izquierda
+        self.lbl_stats_historial = ttk.Label(self.frame_historial, text="Peleas: 0  |  Rondas: 0  |  Atletas: 0  |  Clubes: 0", foreground="#17a2b8", font=("Helvetica", 9, "bold"))
+        self.lbl_stats_historial.pack(side="left", padx=10)
+
+        # Buscador alineado a la derecha
+        frame_busqueda = ttk.Frame(self.frame_historial)
+        frame_busqueda.pack(side="right", padx=10)
+        
+        ttk.Label(frame_busqueda, text="Buscar por:").pack(side="left", padx=5)
+        self.cmb_buscar_historial = ttk.Combobox(frame_busqueda, values=["Ronda", "Estilo", "División", "Atleta", "Club"], state="readonly", width=12)
+        self.cmb_buscar_historial.set("Atleta")
+        self.cmb_buscar_historial.pack(side="left", padx=5)
+        
+        self.ent_buscar_historial = ttk.Entry(frame_busqueda, width=25)
+        self.ent_buscar_historial.pack(side="left", padx=5)
+        
+        # Eventos del buscador inteligente
+        self.ent_buscar_historial.bind("<KeyRelease>", lambda e: self.actualizar_cartelera())
+        self.cmb_buscar_historial.bind("<<ComboboxSelected>>", lambda e: [self.ent_buscar_historial.delete(0, tk.END), self.actualizar_cartelera()])
+
+        # ================= 3. INICIO DE LA TABLA PERSONALIZADA =================
+        contenedor_tabla = ttk.Frame(self.tab_cartelera)
+
+        # FALSO ENCABEZADO
+        header_frame = tk.Frame(contenedor_tabla, height=30)
+        header_frame.pack(fill="x")
+        header_frame.pack_propagate(False)
+
+        def crear_celda_header(texto, ancho, bg_color):
+            celda = tk.Frame(header_frame, width=ancho, bg=bg_color, highlightbackground="#555555", highlightthickness=1)
+            celda.pack(side="left", fill="y")
+            celda.pack_propagate(False)
+            tk.Label(celda, text=texto, bg=bg_color, fg="white", font=("Helvetica", 10, "bold")).pack(expand=True)
+
+        crear_celda_header("Ronda", 80, "#2a2a2a")
+        crear_celda_header("Estilo", 120, "#2a2a2a")
+        crear_celda_header("División", 100, "#2a2a2a")
+        crear_celda_header("Esquina Roja", 350, "#cc0000") 
+        crear_celda_header("Esquina Azul", 350, "#0000cc") 
+        
+        filler = tk.Frame(header_frame, bg="#2a2a2a", highlightbackground="#555555", highlightthickness=1)
+        filler.pack(side="left", fill="both", expand=True)
+
+        # TABLA DE DATOS
         columnas = ("ronda", "estilo", "peso", "rojo", "azul")
-        self.tree_cartelera = ttk.Treeview(self.tab_cartelera, columns=columnas, show="headings", height=20)
+        self.tree_cartelera = ttk.Treeview(contenedor_tabla, columns=columnas, show="", height=20)
+        self.tree_cartelera.column("#0", width=0, stretch=tk.NO) 
         
-        self.tree_cartelera.heading("ronda", text="Ronda")
-        self.tree_cartelera.heading("estilo", text="Estilo")
-        self.tree_cartelera.heading("peso", text="División")
-        self.tree_cartelera.heading("rojo", text="Esquina Roja")
-        self.tree_cartelera.heading("azul", text="Esquina Azul")
+        self.tree_cartelera.column("ronda", width=80, anchor="center", stretch=False)
+        self.tree_cartelera.column("estilo", width=120, anchor="center", stretch=False)
+        self.tree_cartelera.column("peso", width=100, anchor="center", stretch=False)
+        self.tree_cartelera.column("rojo", width=350, stretch=False)
+        self.tree_cartelera.column("azul", width=350, stretch=False)
         
-        self.tree_cartelera.column("ronda", width=80, anchor="center")
-        self.tree_cartelera.column("estilo", width=120, anchor="center")
-        self.tree_cartelera.column("peso", width=100, anchor="center")
-        self.tree_cartelera.column("rojo", width=250)
-        self.tree_cartelera.column("azul", width=250)
-        
-        # Evento de doble clic para iniciar pelea
-        self.tree_cartelera.bind("<Double-1>", self.iniciar_pelea_desde_cartelera)
+        self.tree_cartelera.bind("<Double-1>", self.accion_doble_clic_cartelera)
+        self.tree_cartelera.bind("<<TreeviewSelect>>", self.accion_clic_cartelera)
 
-        # --- SOLUCIÓN: CONTENEDOR INFERIOR ANCLADO ---
-        # Empaquetamos esto ANTES que la tabla, asegurando que nunca se corte
+        # --- EVENTOS DE CIERRE DEL PANEL FLOTANTE ---
+        self.tree_cartelera.bind("<Button-1>", self.evaluar_cierre_flotante, add="+") # <-- NUEVO DETECTOR
+        self.tree_cartelera.bind("<MouseWheel>", self.cerrar_panel_flotante_cartelera, add="+")
+        self.tree_cartelera.bind("<Button-4>", self.cerrar_panel_flotante_cartelera, add="+")
+        self.tree_cartelera.bind("<Button-5>", self.cerrar_panel_flotante_cartelera, add="+")
+
+        # ================= 4. CONTENEDOR INFERIOR ANCLADO =================
         frame_inferior = ttk.Frame(self.tab_cartelera)
-        frame_inferior.pack(side="bottom", fill="x", pady=(5, 5)) # Márgenes reducidos
+        frame_inferior.pack(side="bottom", fill="x", pady=(5, 5)) 
 
-        ttk.Label(frame_inferior, text="* Haz doble clic en un combate para abrir el marcador oficial e iniciarlo.", font=("Helvetica", 9, "italic")).pack(pady=(0, 5))
+        self.lbl_hint_cartelera = ttk.Label(frame_inferior, text="* Haz doble clic en un combate para abrir el marcador oficial e iniciarlo.", font=("Helvetica", 9, "italic"))
+        self.lbl_hint_cartelera.pack(pady=(0, 5))
 
-        # --- BOTÓN DE CIERRE DE TORNEO ---
-        # Reducimos el ipady a 5 para que no se vea tan estirado
         self.btn_cerrar_torneo = tk.Button(frame_inferior, text="🏆 CERRAR TORNEO Y GENERAR REPORTE", font=("Helvetica", 12, "bold"), bg="#ff4d4d", fg="white", command=self.cerrar_torneo)
         self.btn_cerrar_torneo.pack(ipadx=15, ipady=5)
 
-        # --- TABLA EMPAQUETADA AL FINAL ---
-        # Como se empaqueta de último, solo tomará el espacio "sobrante" del centro
+        # ================= 5. EMPAQUETADO FINAL =================
+        contenedor_tabla.pack(side="top", fill="both", expand=True)
         self.tree_cartelera.pack(side="top", fill="both", expand=True)
+
+    def accion_doble_clic_cartelera(self, event):
+        """Se dispara con doble clic. Si estamos en historial, no hace nada."""
+        if getattr(self, "modo_historial", False):
+            return 
+        self.iniciar_pelea_desde_cartelera(event)
+
+    def accion_clic_cartelera(self, event):
+        """Se dispara con un solo clic. En modo historial, despliega el panel flotante."""
+        if not getattr(self, "modo_historial", False):
+            return 
+        
+        sel = self.tree_cartelera.selection()
+        if not sel: return
+        item_id = sel[0]
+        
+        llave_key = self.tree_cartelera.item(item_id, "text")
+        match_node = getattr(self.tree_cartelera, f"nodo_{item_id}", None)
+        
+        if match_node:
+            self.mostrar_panel_historial_cartelera(match_node, llave_key, item_id)
+
+    def cerrar_panel_flotante_cartelera(self, event=None):
+        """Destruye el panel superpuesto si existe."""
+        if hasattr(self, "panel_flotante") and self.panel_flotante.winfo_exists():
+            self.panel_flotante.destroy()
+
+    def evaluar_cierre_flotante(self, event):
+        """Si el usuario hace clic fuera de los límites del panel flotante, lo destruye."""
+        if not hasattr(self, "panel_flotante") or not self.panel_flotante.winfo_exists():
+            return
+            
+        # Coordenadas globales del ratón en la pantalla
+        x_root, y_root = event.x_root, event.y_root
+        
+        # Coordenadas globales de los límites del panel
+        x1 = self.panel_flotante.winfo_rootx()
+        y1 = self.panel_flotante.winfo_rooty()
+        x2 = x1 + self.panel_flotante.winfo_width()
+        y2 = y1 + self.panel_flotante.winfo_height()
+
+        # Si el clic NO fue dentro del cuadrado del panel, lo cerramos
+        if not (x1 <= x_root <= x2 and y1 <= y_root <= y2):
+            self.cerrar_panel_flotante_cartelera()
+
+    def mostrar_panel_historial_cartelera(self, match_node, llave_key, item_id):
+        self.cerrar_panel_flotante_cartelera() # Limpiar panel previo
+
+        # Obtener coordenadas de la fila clicada (X, Y, Ancho, Alto)
+        bbox = self.tree_cartelera.bbox(item_id)
+        if not bbox: return # Si la fila no es visible en pantalla, abortar
+
+        p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
+        p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
+        
+        # --- CREAR EL PANEL FLOTANTE SOBRE EL TREEVIEW ---
+        self.panel_flotante = tk.Frame(self.tree_cartelera, bg="#2d2d2d", highlightbackground="gray", highlightthickness=1)
+        
+        # --- ENCABEZADO (SIN BOTÓN X) ---
+        top_bar = tk.Frame(self.panel_flotante, bg="#1e1e1e")
+        top_bar.pack(fill="x")
+        ttk.Label(top_bar, text=f"Detalles del Combate (Ronda {match_node['ronda']})", font=("Helvetica", 10, "bold"), background="#1e1e1e", foreground="white").pack(pady=5)
+        
+        # --- CUERPO DEL PANEL (Mismo diseño que las llaves) ---
+        main_frame = ttk.Frame(self.panel_flotante, padding=10)
+        main_frame.pack(fill="both", expand=True)
+        
+        frame_vs = ttk.Frame(main_frame)
+        frame_vs.pack(pady=5)
+        
+        # Detección de Descalificaciones Previas
+        is_rojo_fantasma = p_rojo and p_rojo.get("id") == -1
+        is_azul_fantasma = p_azul and p_azul.get("id") == -1
+        
+        if is_rojo_fantasma and not is_azul_fantasma:
+            ttk.Label(frame_vs, text=p_azul['nombre'], foreground="#6666ff", font=("Helvetica", 11, "bold")).pack()
+            ttk.Label(frame_vs, text="Avanza por Incomparecencia (Op. Descalificado)", font=("Helvetica", 9, "italic"), foreground="#aaaaaa").pack()
+        elif is_azul_fantasma and not is_rojo_fantasma:
+            ttk.Label(frame_vs, text=p_rojo['nombre'], foreground="#ff6666", font=("Helvetica", 11, "bold")).pack()
+            ttk.Label(frame_vs, text="Avanza por Incomparecencia (Op. Descalificado)", font=("Helvetica", 9, "italic"), foreground="#aaaaaa").pack()
+        elif is_rojo_fantasma and is_azul_fantasma:
+            ttk.Label(frame_vs, text="Llave Vacante", foreground="#dc3545", font=("Helvetica", 11, "bold")).pack()
+            ttk.Label(frame_vs, text="(Ambos oponentes previos descalificados)", font=("Helvetica", 9, "italic"), foreground="#aaaaaa").pack()
+        else:
+            nom_rojo = p_rojo['nombre'] if p_rojo else "A la espera..."
+            nom_azul = p_azul['nombre'] if p_azul else "A la espera..."
+            ttk.Label(frame_vs, text=nom_rojo, foreground="#ff6666", font=("Helvetica", 10, "bold")).grid(row=0, column=0, padx=5)
+            ttk.Label(frame_vs, text=" VS ", font=("Helvetica", 10, "bold")).grid(row=0, column=1)
+            ttk.Label(frame_vs, text=nom_azul, foreground="#6666ff", font=("Helvetica", 10, "bold")).grid(row=0, column=2, padx=5)
+        
+        estado = "Finalizado" if match_node.get("ganador") else "Pendiente"
+        ttk.Label(main_frame, text=f"Estado: {estado}", foreground="#28a745", font=("Helvetica", 9, "bold")).pack(pady=(10, 2))
+        
+        if match_node.get("ganador"):
+            ganador = match_node["ganador"]
+            motivo = ganador.get("motivo_victoria", "Decisión")
+            ganador_id = ganador.get("id")
+            
+            if ganador_id == -1:
+                ttk.Label(main_frame, text="Resultado: Doble Descalificación", foreground="#ff4d4d", font=("Helvetica", 10, "bold")).pack()
+            else:
+                ttk.Label(main_frame, text=f"Ganador: {ganador['nombre']}", foreground="#28a745", font=("Helvetica", 10, "bold")).pack()
+            ttk.Label(main_frame, text=f"Método: {motivo}", foreground="#17a2b8", font=("Helvetica", 9)).pack(pady=(0, 5))
+        
+        # Botones (Modo Historial - Solo Lectura)
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(pady=(10, 0))
+        estilo_ext, peso_ext = llave_key.split("-")
+        
+        if is_rojo_fantasma or is_azul_fantasma:
+            ttk.Label(btn_frame, text="Avance Automático (Sin Acta de Combate)", foreground="#17a2b8", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
+        else:
+            ttk.Label(btn_frame, text="Registro Histórico (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: self.abrir_previsualizacion_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+
+        # --- CÁLCULO DE POSICIÓN MÁGICA (Debajo de la fila) ---
+        self.panel_flotante.update_idletasks()
+        ancho_panel = self.panel_flotante.winfo_reqwidth()
+        alto_panel = self.panel_flotante.winfo_reqheight()
+        
+        x_pos = (self.tree_cartelera.winfo_width() // 2) - (ancho_panel // 2)
+        y_pos = bbox[1] + bbox[3] # Justo debajo del borde inferior de la fila
+        
+        # Inteligencia de bordes: Si choca abajo, lo desplegamos hacia arriba de la fila
+        if y_pos + alto_panel > self.tree_cartelera.winfo_height():
+            y_pos = bbox[1] - alto_panel
+            
+        self.panel_flotante.place(x=max(10, x_pos), y=y_pos)
 
     def al_cambiar_pestana(self, event):
         self.cerrar_panel_combate() # <-- NUEVO
@@ -576,96 +759,134 @@ class PantallaPareo(ttk.Frame):
         if self.notebook.index(self.notebook.select()) == 0:
             self.actualizar_cartelera()
 
-    def actualizar_cartelera(self):
+    def actualizar_cartelera(self, event=None):
+        self.cerrar_panel_flotante_cartelera() # <-- NUEVO: Borra el panel antes de recargar la tabla
+
         # Limpiar tabla
         for item in self.tree_cartelera.get_children():
             self.tree_cartelera.delete(item)
             
-        combates_pendientes = []
+        todas_peleas = []
+        total_peleas = 0
+        completadas = 0
         
-        # 1. Recopilar todos los combates pendientes listos para pelear
+        # 1. Recopilar todos los combates de las llaves bloqueadas
         for llave_key in self.divisiones_bloqueadas:
             grid = self.grids_generados.get(llave_key, [])
             estilo, peso_str = llave_key.split("-")
-            
-            # Limpiar el peso para poder ordenarlo numéricamente (ej: "57 kg" -> 57)
             peso_int = int(peso_str.replace(" kg", "").strip())
-            
-            # Dar prioridad 0 a Femenina, y 1 al resto (para que Femenina vaya primero)
             prio_estilo = 0 if "Femenina" in estilo else 1
 
             for r in range(len(grid)):
                 for node in grid[r]:
                     if isinstance(node, dict) and node.get("tipo") == "combate":
-                        if node.get("ganador") is None: # Si no tiene ganador
-                            p_rojo = self.obtener_peleador_real(node["peleador_rojo"])
-                            p_azul = self.obtener_peleador_real(node["peleador_azul"])
+                        p_rojo = self.obtener_peleador_real(node["peleador_rojo"])
+                        p_azul = self.obtener_peleador_real(node["peleador_azul"])
+                        
+                        if p_rojo and p_azul:
+                            total_peleas += 1
+                            is_terminada = node.get("ganador") is not None
+                            if is_terminada: completadas += 1
                             
-                            # Ambos contrincantes deben estar definidos
-                            if p_rojo and p_azul:
-                                combates_pendientes.append({
-                                    "ronda": node["ronda"],
-                                    "prio_estilo": prio_estilo,
-                                    "estilo": estilo,
-                                    "peso_int": peso_int,
-                                    "peso_str": peso_str,
-                                    "id_rojo": p_rojo['id'],
-                                    # --- NUEVO: Agregamos el club entre paréntesis ---
-                                    "nom_rojo": f"{p_rojo['nombre']} ({p_rojo.get('club', 'Sin Club')})",
-                                    "id_azul": p_azul['id'],
-                                    "nom_azul": f"{p_azul['nombre']} ({p_azul.get('club', 'Sin Club')})",
-                                    "nodo_combate": node,
-                                    "llave_key": llave_key
-                                })
+                            todas_peleas.append({
+                                "ronda": node["ronda"],
+                                "prio_estilo": prio_estilo,
+                                "estilo": estilo,
+                                "peso_int": peso_int,
+                                "peso_str": peso_str,
+                                "id_rojo": p_rojo['id'],
+                                "nom_rojo": f"{p_rojo['nombre']} ({p_rojo.get('club', 'Sin Club')})",
+                                "id_azul": p_azul['id'],
+                                "nom_azul": f"{p_azul['nombre']} ({p_azul.get('club', 'Sin Club')})",
+                                "club_rojo": p_rojo.get('club', 'Sin Club'),
+                                "club_azul": p_azul.get('club', 'Sin Club'),
+                                "nodo_combate": node,
+                                "llave_key": llave_key,
+                                "terminada": is_terminada
+                            })
+                            
+        # 2. Evaluar Estado: ¿Estamos en modo Historial?
+        self.modo_historial = (total_peleas > 0 and completadas == total_peleas) or getattr(self, "torneo_cerrado_en_db", False)
         
-        # 2. Ordenamiento Dinámico según la selección del usuario
-        modo_seleccionado = getattr(self, "combo_orden_cartelera", None)
-        
-        if modo_seleccionado and "Prioridad Femenina" in modo_seleccionado.get():
-            # MODO 2: Primero todo Femenino (respetando sus rondas y pesos), 
-            # luego Libre y Greco mezclados (respetando sus rondas y pesos).
-            combates_pendientes.sort(key=lambda x: (x["prio_estilo"], x["ronda"], x["peso_int"]))
+        if self.modo_historial:
+            # === MODO HISTORIAL ===
+            self.lbl_titulo_cartelera.config(text="Historial de Combates (Por Fases)")
+            self.frame_orden.pack_forget()
+            if not self.frame_historial.winfo_ismapped():
+                self.frame_historial.pack(side="left", fill="x", expand=True)
+            if hasattr(self, 'lbl_hint_cartelera'): 
+                self.lbl_hint_cartelera.pack_forget()
+            
+            # Aplicar Filtros de Búsqueda
+            search_term = self.ent_buscar_historial.get().lower().strip()
+            search_by = self.cmb_buscar_historial.get()
+            
+            combates_mostrar = []
+            for c in todas_peleas:
+                if search_term:
+                    if search_by == "Atleta" and (search_term in c['nom_rojo'].lower() or search_term in c['nom_azul'].lower()): combates_mostrar.append(c)
+                    elif search_by == "Club" and (search_term in c['club_rojo'].lower() or search_term in c['club_azul'].lower()): combates_mostrar.append(c)
+                    elif search_by == "Ronda" and search_term in str(c['ronda']): combates_mostrar.append(c)
+                    elif search_by == "Estilo" and search_term in c['estilo'].lower(): combates_mostrar.append(c)
+                    elif search_by == "División" and search_term in c['peso_str'].lower(): combates_mostrar.append(c)
+                else:
+                    combates_mostrar.append(c)
+                    
+            # Calcular y Mostrar Estadísticas a la izquierda
+            rondas_unicas = len(set(c['ronda'] for c in combates_mostrar))
+            ids_atletas = set([c['id_rojo'] for c in combates_mostrar] + [c['id_azul'] for c in combates_mostrar])
+            ids_clubes = set([c['club_rojo'] for c in combates_mostrar] + [c['club_azul'] for c in combates_mostrar])
+            if "Sin Club" in ids_clubes: ids_clubes.remove("Sin Club") # Limpiar genéricos
+            
+            self.lbl_stats_historial.config(text=f"Peleas: {len(combates_mostrar)}  |  Rondas: {rondas_unicas}  |  Atletas: {len(ids_atletas)}  |  Clubes: {len(ids_clubes)}")
+            
+            # Ordenar para historial (cronológico de torneo)
+            combates_mostrar.sort(key=lambda x: (x["ronda"], x["prio_estilo"], x["peso_int"]))
+            cartelera_final = combates_mostrar
+            
         else:
-            # MODO 1: Prioridad absoluta a la Ronda. 
-            # Mezcla Libre, Greco y Femenino en la misma fase, ordenados estrictamente por peso.
-            combates_pendientes.sort(key=lambda x: (x["ronda"], x["peso_int"], x["prio_estilo"]))
-        
-        # 3. Algoritmo de Separación (Descanso para los atletas)
-        cartelera_final = []
-        registro_descanso = {} # Guarda el índice en la cartelera del último combate de cada atleta
-        
-        # Separación mínima deseada (ej: intentar que haya al menos 3 peleas de por medio)
-        separacion_ideal = 3 
-
-        while combates_pendientes:
-            mejor_idx = 0 # Por defecto, tomamos el primero en la lista (que respeta el orden ideal)
+            # === MODO NORMAL (PENDIENTES) ===
+            self.lbl_titulo_cartelera.config(text="Orden de Combates Sugerido (Por Fases)")
+            self.frame_historial.pack_forget()
+            if not self.frame_orden.winfo_ismapped():
+                self.frame_orden.pack(side="left", fill="x", expand=True)
+            if hasattr(self, 'lbl_hint_cartelera') and not self.lbl_hint_cartelera.winfo_ismapped():
+                self.lbl_hint_cartelera.pack(pady=(0, 5), before=self.btn_cerrar_torneo)
             
-            for i, c in enumerate(combates_pendientes):
-                # Calcular cuántas peleas han pasado desde la última vez que peleó cada uno
-                distancia_r = len(cartelera_final) - registro_descanso.get(c["id_rojo"], -999)
-                distancia_a = len(cartelera_final) - registro_descanso.get(c["id_azul"], -999)
+            combates_pendientes = [c for c in todas_peleas if not c['terminada']]
+            
+            modo_seleccionado = getattr(self, "combo_orden_cartelera", None)
+            if modo_seleccionado and "Prioridad Femenina" in modo_seleccionado.get():
+                combates_pendientes.sort(key=lambda x: (x["prio_estilo"], x["ronda"], x["peso_int"]))
+            else:
+                combates_pendientes.sort(key=lambda x: (x["ronda"], x["peso_int"], x["prio_estilo"]))
+            
+            # Algoritmo de Separación (Descanso)
+            cartelera_final = []
+            registro_descanso = {} 
+            separacion_ideal = 3 
+
+            while combates_pendientes:
+                mejor_idx = 0 
+                for i, c in enumerate(combates_pendientes):
+                    distancia_r = len(cartelera_final) - registro_descanso.get(c["id_rojo"], -999)
+                    distancia_a = len(cartelera_final) - registro_descanso.get(c["id_azul"], -999)
+                    if distancia_r >= separacion_ideal and distancia_a >= separacion_ideal:
+                        mejor_idx = i
+                        break 
                 
-                # Si ambos atletas han descansado lo suficiente, este es el combate ideal
-                if distancia_r >= separacion_ideal and distancia_a >= separacion_ideal:
-                    mejor_idx = i
-                    break 
-            
-            # Sacamos el combate seleccionado de los pendientes y lo metemos a la final
-            elegido = combates_pendientes.pop(mejor_idx)
-            cartelera_final.append(elegido)
-            
-            # Actualizamos cuándo fue la última vez que pelearon
-            indice_actual = len(cartelera_final) - 1
-            registro_descanso[elegido["id_rojo"]] = indice_actual
-            registro_descanso[elegido["id_azul"]] = indice_actual
+                elegido = combates_pendientes.pop(mejor_idx)
+                cartelera_final.append(elegido)
+                indice_actual = len(cartelera_final) - 1
+                registro_descanso[elegido["id_rojo"]] = indice_actual
+                registro_descanso[elegido["id_azul"]] = indice_actual
 
-        # 4. Insertar la cartelera ya optimizada en la tabla visual
+        # 3. Insertar la cartelera ya optimizada en la tabla visual
         for idx, c in enumerate(cartelera_final):
             self.tree_cartelera.insert("", "end", iid=str(idx), values=(
                 f"Ronda {c['ronda']}", c['estilo'], c['peso_str'], c['nom_rojo'], c['nom_azul']
             ), tags=(c['llave_key'], str(c['nodo_combate'])))
             
-            # Almacenar datos para el doble clic
             self.tree_cartelera.item(str(idx), text=c['llave_key'])
             setattr(self.tree_cartelera, f"nodo_{idx}", c['nodo_combate'])
 
@@ -855,44 +1076,65 @@ class PantallaPareo(ttk.Frame):
         self.gestionar_botones_globales()
         
     def generar_pareo_optimo(self, atletas):
-        """Algoritmo Seeding: Separa clubes y fuerza a los impares (Byes) hacia arriba."""
+        """Algoritmo Seeding UWW: Separa clubes y distribuye Byes simétricamente."""
         n = len(atletas)
         if n == 0: return []
+        if n == 1: return [atletas[0]] 
         
-        # Regla estricta: Si es 1 solo atleta
-        if n == 1: 
-            return [atletas[0]] 
-        
-        # 1. Determinar tamaño de la llave (Próxima potencia de 2)
+        # 1. Determinar tamaño del bracket
         potencia = 2 ** math.ceil(math.log2(n)) 
         
-        # 2. Agrupar por club y ordenar de mayor a menor cantidad
+        # 2. Separación de Clubes
         clubes = {}
         for a in atletas: clubes.setdefault(a['club'], []).append(a)
         clubes_ordenados = sorted(clubes.values(), key=len, reverse=True)
         
-        # 3. Esparcir alternando para que no queden compañeros juntos
         atletas_esparcidos = []
         while any(clubes_ordenados):
             for club_list in clubes_ordenados:
                 if club_list: atletas_esparcidos.append(club_list.pop(0))
                     
-        # 4. --- NUEVA REGLA ESTÉTICA: BYES ARRIBA ---
-        # Calculamos cuántos espacios vacíos necesitamos
+        # --- 3. DISTRIBUCIÓN SIMÉTRICA DE BYES (REGLA UWW) ---
         byes = potencia - n
         llave_final = [None] * potencia
         
-        # Asignamos los byes a los primeros índices impares (1, 3, 5...)
-        # Esto hace que el atleta quede en el índice par (0, 2, 4...) y visualmente arriba
+        # Índices impares corresponden a los oponentes. Si está vacío, es un Bye.
         indices_impares = [i for i in range(1, potencia, 2)]
-        posiciones_byes = set(indices_impares[:byes])
         
-        # Las posiciones disponibles son todas las que NO fueron marcadas como byes
+        # Repartir Byes equitativamente arriba y abajo
+        byes_top = math.ceil(byes / 2)
+        byes_bottom = byes - byes_top
+        
+        posiciones_byes = set()
+        
+        # Colocar Byes en la parte superior (bajando)
+        for i in range(byes_top):
+            posiciones_byes.add(indices_impares[i])
+            
+        # Colocar Byes en la parte inferior (subiendo)
+        for i in range(byes_bottom):
+            posiciones_byes.add(indices_impares[-(i+1)])
+        
+        # 4. Las posiciones disponibles son todas las que NO fueron marcadas como byes
         posiciones_disponibles = [i for i in range(potencia) if i not in posiciones_byes]
         
-        # Insertar a los atletas ya separados por club en las posiciones disponibles
+        # --- NUEVO: DISTRIBUCIÓN EN EXTREMOS OPUESTOS (Siembra Oficial) ---
+        # Alternamos: uno arriba, uno abajo, uno arriba, uno abajo...
+        # Esto garantiza que atletas del mismo club queden en llaves diferentes (se topan hasta la final)
+        posiciones_extremas = []
+        izq = 0
+        der = len(posiciones_disponibles) - 1
+        
+        while izq <= der:
+            posiciones_extremas.append(posiciones_disponibles[izq])
+            if izq != der:
+                posiciones_extremas.append(posiciones_disponibles[der])
+            izq += 1
+            der -= 1
+
+        # Insertar a los atletas usando el nuevo orden de extremos
         for i, atleta in enumerate(atletas_esparcidos):
-            llave_final[posiciones_disponibles[i]] = atleta
+            llave_final[posiciones_extremas[i]] = atleta
             
         return llave_final
 

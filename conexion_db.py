@@ -639,3 +639,41 @@ class ConexionDB:
             return False
         finally:
             conexion.close()
+
+    def obtener_peleadores_descalificados(self, id_torneo):
+        """Devuelve un set de IDs de atletas que han sido descalificados en el torneo."""
+        conexion = self.conectar()
+        if not conexion: return set()
+        descalificados = set()
+        try:
+            with conexion.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT i_rojo.id_peleador as id_rojo, 
+                           i_azul.id_peleador as id_azul, 
+                           i_gan.id_peleador as id_ganador,
+                           tv.codigo_uww
+                    FROM combate c
+                    JOIN torneo_division td ON c.id_torneo_division = td.id
+                    LEFT JOIN tipo_victoria tv ON c.id_tipo_victoria = tv.id
+                    LEFT JOIN inscripcion i_rojo ON c.id_inscripcion_rojo = i_rojo.id
+                    LEFT JOIN inscripcion i_azul ON c.id_inscripcion_azul = i_azul.id
+                    LEFT JOIN inscripcion i_gan ON c.id_inscripcion_ganador = i_gan.id
+                    WHERE td.id_torneo = %s AND c.estado = 'Finalizado'
+                """, (id_torneo,))
+                
+                for r in cur.fetchall():
+                    # Si es 2DSQ (No hay ganador en la BD)
+                    if r['id_ganador'] is None:
+                        if r['id_rojo']: descalificados.add(r['id_rojo'])
+                        if r['id_azul']: descalificados.add(r['id_azul'])
+                    # Si es DSQ normal, el perdedor es el descalificado
+                    elif r['codigo_uww'] == 'DSQ':
+                        if r['id_rojo'] and r['id_rojo'] != r['id_ganador']:
+                            descalificados.add(r['id_rojo'])
+                        if r['id_azul'] and r['id_azul'] != r['id_ganador']:
+                            descalificados.add(r['id_azul'])
+        except Exception as e:
+            print(f"Error obteniendo descalificados: {e}")
+        finally:
+            conexion.close()
+        return descalificados
