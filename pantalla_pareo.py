@@ -226,6 +226,8 @@ class PantallaPareo(ttk.Frame):
 
     def exportar_imagen_llave(self, tab=None, ruta_directa=None):
         """Exporta la llave horneando el fondo y muestreando su color para eliminar bordes residuales."""
+        self.cerrar_panel_combate() # <-- NUEVO: Elimina residuos visuales antes de la foto
+
         if not tab: tab = self.notebook.nametowidget(self.notebook.select())
         tab.canvas.update()
         
@@ -338,6 +340,8 @@ class PantallaPareo(ttk.Frame):
 
     def exportar_todas_las_imagenes(self):
         """Crea carpeta con ID_Torneo/Categoría_Peso.png en el directorio elegido."""
+        self.cerrar_panel_combate() # <-- NUEVO: Elimina residuos visuales antes de la foto
+
         dir_padre = filedialog.askdirectory(title="Seleccione dónde crear la carpeta de llaves")
         if not dir_padre: return
 
@@ -606,9 +610,10 @@ class PantallaPareo(ttk.Frame):
                                     "peso_int": peso_int,
                                     "peso_str": peso_str,
                                     "id_rojo": p_rojo['id'],
-                                    "nom_rojo": p_rojo['nombre'],
+                                    # --- NUEVO: Agregamos el club entre paréntesis ---
+                                    "nom_rojo": f"{p_rojo['nombre']} ({p_rojo.get('club', 'Sin Club')})",
                                     "id_azul": p_azul['id'],
-                                    "nom_azul": p_azul['nombre'],
+                                    "nom_azul": f"{p_azul['nombre']} ({p_azul.get('club', 'Sin Club')})",
                                     "nodo_combate": node,
                                     "llave_key": llave_key
                                 })
@@ -906,7 +911,7 @@ class PantallaPareo(ttk.Frame):
         potencia = len(llave_array)
         rondas_totales = int(math.log2(potencia)) if potencia > 1 else 0
 
-        box_w, box_h, x_pad, y_pad = 140, 30, 60, 20
+        box_w, box_h, x_pad, y_pad = 155, 40, 60, 20 
         x_start, y_start = 60, 60
 
         # Coordenadas y Matriz (Mantenido igual)
@@ -997,10 +1002,18 @@ class PantallaPareo(ttk.Frame):
                         # Si SÍ está bloqueado
                         if ganador:
                             color_texto = "#ff4d4d" if ganador['id'] == -1 else "white"
-                            font_w = "bold" if ganador['id'] == -1 else "normal"
-                            texto_mostrar = "Doble Descalificación" if ganador['id'] == -1 else ganador['nombre']
                             
-                            canvas.create_text(x + 10, y, text=texto_mostrar, fill=color_texto, anchor="w", font=("Helvetica", 9, font_w))
+                            if ganador['id'] == -1:
+                                # Si es Doble DSQ, va centrado en una sola línea
+                                canvas.create_text(x + 10, y, text="Doble Descalificación", fill=color_texto, anchor="w", font=("Helvetica", 9, "bold"))
+                            else:
+                                # Nombre en Negrita (arriba) y Club en Normal gris (abajo)
+                                canvas.create_text(x + 10, y - 7, text=ganador['nombre'], fill=color_texto, anchor="w", font=("Helvetica", 9, "bold"))
+                                canvas.create_text(x + 10, y + 8, text=ganador.get('club', 'Sin Club'), fill="#aaaaaa", anchor="w", font=("Helvetica", 7))
+                            
+                            ciudad = ganador.get('ciudad', 'No especificada')
+                            texto_tooltip = f"Atleta: {ganador['nombre']}\nClub: {ganador.get('club', '')}\nCiudad: {ciudad}\nID: {ganador['id']}"
+                            canvas.zonas_tooltip.append((x, box_y1, x + box_w, box_y2, texto_tooltip))
                         
                         # 2. Hace clicable SOLO si le precede al menos 1 atleta
                         if p_rojo is not None or p_azul is not None:
@@ -1019,7 +1032,9 @@ class PantallaPareo(ttk.Frame):
                     color_esquina = "#ff4d4d" if k % 2 == 0 else "#4d4dff"
                     canvas.create_rectangle(x, box_y1, x + 5, box_y2, fill=color_esquina, outline="") 
 
-                    canvas.create_text(x + 10, y, text=node['nombre'], fill="white", anchor="w", font=("Helvetica", 9))
+                    # --- NUEVO: Nombre en negrita y club en gris ---
+                    canvas.create_text(x + 10, y - 7, text=node['nombre'], fill="white", anchor="w", font=("Helvetica", 9, "bold"))
+                    canvas.create_text(x + 10, y + 8, text=node.get('club', 'Sin Club'), fill="#aaaaaa", anchor="w", font=("Helvetica", 7))
 
                     if self.modo_edicion:
                         canvas.cajas_clickable.append((x, box_y1, x + box_w, box_y2, idx))
@@ -1126,35 +1141,44 @@ class PantallaPareo(ttk.Frame):
         
         self.cerrar_panel_combate() # Limpiar panel previo
         self.canvas_panel_actual = tab.canvas # Guardar referencia del canvas actual
-
-        # --- SOLUCIÓN: CREAR EL PANEL COMO UN ELEMENTO INTERNO DEL CANVAS ---
-        self.panel_combate = tk.Frame(tab.canvas, bg="#2d2d2d", highlightbackground="gray", highlightthickness=1)
         
-        # Incrustarlo matemáticamente en el lienzo (se desplazará con el scroll y será tapado por los bordes)
+        # --- CREAR EL PANEL COMO UN ELEMENTO INTERNO DEL CANVAS ---
+        self.panel_combate = tk.Frame(tab.canvas, bg="#2d2d2d", highlightbackground="gray", highlightthickness=1)
         self.id_ventana_canvas = tab.canvas.create_window(x_canvas, y_canvas + 5, window=self.panel_combate, anchor="nw")
         
-        # --- NUEVO ENCABEZADO (SIN LA X) ---
+        # --- ENCABEZADO ---
         top_bar = tk.Frame(self.panel_combate, bg="#1e1e1e")
         top_bar.pack(fill="x")
-        
-        # El título ahora está centrado automáticamente
         ttk.Label(top_bar, text=f"Detalles del Combate (Ronda {match_node['ronda']})", font=("Helvetica", 10, "bold"), background="#1e1e1e", foreground="white").pack(pady=5)
         
-        # --- CUERPO DEL PANEL (El resto de tu código sigue igual a partir de aquí) ---
+        # --- CUERPO DEL PANEL ---
         main_frame = ttk.Frame(self.panel_combate, padding=10)
         main_frame.pack(fill="both", expand=True)
         
         frame_vs = ttk.Frame(main_frame)
         frame_vs.pack(pady=5)
         
-        nom_rojo = p_rojo['nombre'] if p_rojo else "A la espera..."
-        nom_azul = p_azul['nombre'] if p_azul else "A la espera..."
+        # --- DETECCIÓN DE DESCALIFICACIONES PREVIAS (Fantasmas) ---
+        is_rojo_fantasma = p_rojo and p_rojo.get("id") == -1
+        is_azul_fantasma = p_azul and p_azul.get("id") == -1
         
-        ttk.Label(frame_vs, text=nom_rojo, foreground="#ff6666", font=("Helvetica", 10, "bold")).grid(row=0, column=0, padx=5)
-        ttk.Label(frame_vs, text=" VS ", font=("Helvetica", 10, "bold")).grid(row=0, column=1)
-        ttk.Label(frame_vs, text=nom_azul, foreground="#6666ff", font=("Helvetica", 10, "bold")).grid(row=0, column=2, padx=5)
+        if is_rojo_fantasma and not is_azul_fantasma:
+            ttk.Label(frame_vs, text=p_azul['nombre'], foreground="#6666ff", font=("Helvetica", 11, "bold")).pack()
+            ttk.Label(frame_vs, text="Avanza por Incomparecencia (Op. Descalificado)", font=("Helvetica", 9, "italic"), foreground="#aaaaaa").pack()
+        elif is_azul_fantasma and not is_rojo_fantasma:
+            ttk.Label(frame_vs, text=p_rojo['nombre'], foreground="#ff6666", font=("Helvetica", 11, "bold")).pack()
+            ttk.Label(frame_vs, text="Avanza por Incomparecencia (Op. Descalificado)", font=("Helvetica", 9, "italic"), foreground="#aaaaaa").pack()
+        elif is_rojo_fantasma and is_azul_fantasma:
+            ttk.Label(frame_vs, text="Llave Vacante", foreground="#dc3545", font=("Helvetica", 11, "bold")).pack()
+            ttk.Label(frame_vs, text="(Ambos oponentes previos descalificados)", font=("Helvetica", 9, "italic"), foreground="#aaaaaa").pack()
+        else:
+            nom_rojo = p_rojo['nombre'] if p_rojo else "A la espera..."
+            nom_azul = p_azul['nombre'] if p_azul else "A la espera..."
+            ttk.Label(frame_vs, text=nom_rojo, foreground="#ff6666", font=("Helvetica", 10, "bold")).grid(row=0, column=0, padx=5)
+            ttk.Label(frame_vs, text=" VS ", font=("Helvetica", 10, "bold")).grid(row=0, column=1)
+            ttk.Label(frame_vs, text=nom_azul, foreground="#6666ff", font=("Helvetica", 10, "bold")).grid(row=0, column=2, padx=5)
         
-        # --- NUEVAS GENERALIDADES (ESTADO Y GANADOR) ---
+        # --- ESTADO Y GANADOR ---
         estado = "Finalizado" if match_node.get("ganador") else "Pendiente"
         color_estado = "#28a745" if estado == "Finalizado" else "#ffc107"
         
@@ -1163,7 +1187,15 @@ class PantallaPareo(ttk.Frame):
         if match_node.get("ganador"):
             ganador = match_node["ganador"]
             motivo = ganador.get("motivo_victoria", "Decisión")
-            ttk.Label(main_frame, text=f"Ganador: {ganador['nombre']}", foreground="white", font=("Helvetica", 9)).pack()
+            ganador_id = ganador.get("id")
+            
+            # --- NUEVO: Adaptación de texto y color si hay ganador o 2DSQ ---
+            if ganador_id == -1:
+                ttk.Label(main_frame, text="Resultado: Doble Descalificación", foreground="#ff4d4d", font=("Helvetica", 10, "bold")).pack()
+            else:
+                # Color de letra verde para destacar al ganador real
+                ttk.Label(main_frame, text=f"Ganador: {ganador['nombre']}", foreground="#28a745", font=("Helvetica", 10, "bold")).pack()
+                
             ttk.Label(main_frame, text=f"Método: {motivo}", foreground="#17a2b8", font=("Helvetica", 9)).pack(pady=(0, 5))
         
         # --- BOTONES DE ACCIÓN ---
@@ -1173,29 +1205,38 @@ class PantallaPareo(ttk.Frame):
         if match_node.get("ganador") is not None:
             ganador_id = match_node["ganador"].get("id")
             motivo = match_node["ganador"].get("motivo_victoria", "")
-            
-            # 1. Bloquear edición si fue DSQ
-            if ganador_id == -1 or "DSQ" in motivo:
-                ttk.Label(btn_frame, text="Combate cerrado por Descalificación", foreground="#dc3545", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
-            # 2. NUEVO: Bloquear edición si el torneo ya se cerró
-            elif getattr(self, "torneo_cerrado_en_db", False):
-                ttk.Label(btn_frame, text="Torneo Finalizado (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
-            # 3. Si no hay bloqueos, permitir editar
-            else:
-                ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
-                
             estilo_ext, peso_ext = llave_key.split("-")
-            # 4. NUEVO: Botón de previsualización de datos
-            ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: self.abrir_previsualizacion_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
             
-        elif p_rojo is not None and p_azul is not None:
-            total_divisiones = sum(len(pesos) for pesos in self.datos.values())
-            if len(self.divisiones_bloqueadas) >= total_divisiones:
-                ttk.Button(btn_frame, text="Iniciar Pelea", command=lambda: self.iniciar_pelea(match_node, tab, llave_key)).pack()
+            # --- NUEVO: Lógica de botones separando pase automático de peleas físicas ---
+            if is_rojo_fantasma or is_azul_fantasma:
+                # Pase por default (sin combate físico). NO se puede ver PDF ni Editar.
+                ttk.Label(btn_frame, text="Avance Automático (Sin Acta de Combate)", foreground="#17a2b8", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
             else:
-                lbl_aviso = ttk.Label(btn_frame, text="Bloquee todas las llaves de peso\npara iniciar la competencia", 
-                                      foreground="#f39c12", font=("Helvetica", 9, "bold"), justify="center")
-                lbl_aviso.pack()
+                # Hubo combate físico (aunque terminara en DSQ o 2DSQ), así que SÍ se pueden ver los datos
+                if ganador_id == -1 or "DSQ" in motivo:
+                    # Descalificación: se bloquea la edición, pero sí se puede "Ver Datos"
+                    ttk.Label(btn_frame, text="Combate cerrado por Descalificación", foreground="#dc3545", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
+                elif getattr(self, "torneo_cerrado_en_db", False):
+                    # Torneo finalizado: se bloquea la edición
+                    ttk.Label(btn_frame, text="Torneo Finalizado (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
+                else:
+                    # Pelea normal activa: se puede editar
+                    ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
+                
+                # --- BOTÓN DE VER DATOS: Siempre disponible si hubo combate físico ---
+                ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: self.abrir_previsualizacion_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+                
+        elif p_rojo is not None and p_azul is not None:
+            if is_rojo_fantasma or is_azul_fantasma:
+                ttk.Label(btn_frame, text="Avance Automático Pendiente", font=("Helvetica", 9, "italic")).pack()
+            else:
+                total_divisiones = sum(len(pesos) for pesos in self.datos.values())
+                if len(self.divisiones_bloqueadas) >= total_divisiones:
+                    ttk.Button(btn_frame, text="Iniciar Pelea", command=lambda: self.iniciar_pelea(match_node, tab, llave_key)).pack()
+                else:
+                    lbl_aviso = ttk.Label(btn_frame, text="Bloquee todas las llaves de peso\npara iniciar la competencia", 
+                                          foreground="#f39c12", font=("Helvetica", 9, "bold"), justify="center")
+                    lbl_aviso.pack()
         else:
             ttk.Label(btn_frame, text="Esperando clasificado...", font=("Helvetica", 9, "italic")).pack()
 
@@ -1204,12 +1245,11 @@ class PantallaPareo(ttk.Frame):
         
         bbox = tab.canvas.bbox("all")
         if bbox:
-            # bbox[3] ya incluye la altura del panel. Redujimos el margen extra inferior de 60 a solo 15
             min_x, min_y, max_x, max_y = bbox[0] - 60, bbox[1] - 60, bbox[2] + 60, bbox[3] + 15
             tab.canvas.config(scrollregion=(min_x, min_y, max_x, max_y))
             
             altura_visible = tab.canvas.winfo_height()
-            coord_fondo_panel = y_canvas + 5 + self.panel_combate.winfo_height() + 15 # Margen más apretado
+            coord_fondo_panel = y_canvas + 5 + self.panel_combate.winfo_height() + 15 
             coord_fondo_actual = tab.canvas.canvasy(altura_visible)
             
             if coord_fondo_panel > coord_fondo_actual:
