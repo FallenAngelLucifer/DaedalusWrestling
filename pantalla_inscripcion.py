@@ -1283,3 +1283,49 @@ class PantallaInscripcion(ttk.Frame):
         self.torneo_finalizado = True if datos_torneo.get('fecha_fin') else False
         self.actualizar_botones_guardado()
         self.actualizar_tabla_visual()
+
+    def refrescar_estado_bloqueos(self):
+        """Consulta la BD y actualiza la interfaz si hubo cambios en la pantalla de Pareo."""
+        if getattr(self, "torneo_debug_id", None) is None: 
+            return
+
+        # 1. Consultar si el torneo fue cerrado por completo (tiene fecha_fin)
+        conexion = self.db.conectar()
+        if conexion:
+            try:
+                with conexion.cursor() as cur:
+                    cur.execute("SELECT fecha_fin FROM torneo WHERE id = %s", (self.torneo_debug_id,))
+                    res = cur.fetchone()
+                    self.torneo_finalizado = True if (res and res[0]) else False
+            finally: 
+                conexion.close()
+
+        # 2. Consultar qué llaves están bloqueadas ahora
+        self.pesos_bloqueados_ids = self.db.obtener_divisiones_bloqueadas(self.torneo_debug_id)
+
+        # 3. Evaluar si TODAS las divisiones están bloqueadas
+        all_locked = True
+        if not self.inscripciones_memoria:
+            all_locked = False
+        else:
+            for ins in self.inscripciones_memoria:
+                for div_id in ins['ids_divisiones']:
+                    if div_id not in self.pesos_bloqueados_ids:
+                        all_locked = False
+                        break
+                if not all_locked: break
+
+        # 4. Aplicar cambios visuales de bloqueo
+        if all_locked and self.pesos_bloqueados_ids:
+            self.todo_bloqueado = True
+            self.cambiar_estado_inscripcion("disabled")
+            if hasattr(self, 'frame_acciones_memoria'):
+                self.frame_acciones_memoria.pack_forget()
+        else:
+            self.todo_bloqueado = False
+            if hasattr(self, 'frame_acciones_memoria') and not self.frame_acciones_memoria.winfo_ismapped():
+                self.frame_acciones_memoria.pack(side="left", before=self.lbl_estadisticas)
+
+        # 5. Refrescar colores y botones
+        self.actualizar_botones_guardado()
+        self.actualizar_tabla_visual()

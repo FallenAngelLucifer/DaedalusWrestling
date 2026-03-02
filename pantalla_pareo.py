@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import math
 import os
-from PIL import Image, EpsImagePlugin
+from PIL import Image, EpsImagePlugin, ImageDraw, ImageFont
 from conexion_db import ConexionDB
 from utilidades import ComboBuscador
 
@@ -44,38 +44,162 @@ class PantallaPareo(ttk.Frame):
         # Variables para Tooltip
         self.tooltip_window = None
         self.caja_hover_actual = None
-        
+
         # --- NUEVO: Frame de encabezado para navegación y título ---
         header_frame = ttk.Frame(self)
-        header_frame.pack(fill="x", pady=10)
+        header_frame.pack(fill="x", pady=(10, 5))
 
         # Botón para regresar a la pantalla anterior
         self.btn_regresar = ttk.Button(header_frame, text="⬅ Regresar a Inscripción", command=self.regresar_a_inscripcion)
         self.btn_regresar.pack(side="left", padx=20)
 
-        # --- NUEVOS BOTONES GLOBALES ---
-        self.btn_confirmar_todas = tk.Button(header_frame, text="✅ Confirmar Todas", bg="#2c3e50", fg="white", 
-                                              command=self.confirmar_todas_las_llaves)
-        self.btn_confirmar_todas.pack(side="left", padx=5)
-
-        self.btn_exportar_todas_img = tk.Button(header_frame, text="🖼 Exportar Todas (IMG)", bg="#17a2b8", fg="white",
-                                                command=self.exportar_todas_las_imagenes)
-        self.btn_exportar_todas_img.pack(side="left", padx=5)
-        
-        # Verificar si debemos ocultar el botón al cargar
-        self.after(100, self.verificar_visibilidad_confirmar_todas)
-
         lbl_titulo = ttk.Label(header_frame, text="Fase 2: Desarrollo de Pareo (Brackets)", font=("Helvetica", 16, "bold"))
-        lbl_titulo.pack(side="left", expand=True, padx=(0, 150)) # El padding derecho ayuda a centrar el texto
+        lbl_titulo.pack(side="left", expand=True, padx=(0, 150))
+
+        # --- NUEVA FILA: Frame exclusivo para exportaciones masivas ---
+        self.export_frame = ttk.Frame(self)
+        self.export_frame.pack(fill="x", padx=20, pady=(0, 0)) 
+
+        # --- NUEVO: Etiqueta de Estado del Torneo (Alineada a la derecha) ---
+        self.lbl_estado_torneo = ttk.Label(self.export_frame, text="", font=("Helvetica", 10, "bold"))
+        self.lbl_estado_torneo.pack(side="right", padx=10, anchor="s")
+
+        # --- BOTONES GLOBALES DE EXPORTACIÓN (Nacen ocultos por defecto) ---
+        self.btn_exportar_todas_img = tk.Button(self.export_frame, text="🖼 Exportar Todas (IMG)", bg="#17a2b8", fg="white", command=self.exportar_todas_las_imagenes)
+        self.btn_exportar_fichas_pdf = tk.Button(self.export_frame, text="📄 Exportar Fichas (PDF)", bg="#d9534f", fg="white", command=self.exportar_todas_las_fichas_pdf)
+
+        self.after(100, self.gestionar_botones_globales)
 
         # Contenedor dinámico
         self.contenedor_principal = ttk.Frame(self)
         self.contenedor_principal.pack(fill="both", expand=True)
 
+    def gestionar_botones_globales(self):
+        if not hasattr(self, 'btn_exportar_todas_img'): return
+        
+        total_divs = sum(len(p) for p in self.datos.values())
+        todas_bloqueadas = (len(self.divisiones_bloqueadas) >= total_divs) and (total_divs > 0)
+        
+        if todas_bloqueadas:
+            # Torneo Cerrado: Mostramos botones de exportación masiva a la IZQUIERDA
+            # Empaquetamos primero IMG y luego PDF para mantener el orden
+            if not self.btn_exportar_todas_img.winfo_ismapped():
+                self.btn_exportar_todas_img.pack(side="left", padx=(0, 10))
+            if not self.btn_exportar_fichas_pdf.winfo_ismapped():
+                self.btn_exportar_fichas_pdf.pack(side="left", padx=(0, 10))
+        else:
+            # Torneo Abierto: Ocultamos exportación masiva
+            self.btn_exportar_fichas_pdf.pack_forget()
+            self.btn_exportar_todas_img.pack_forget()
+
+    def actualizar_estado_torneo(self):
+        if not hasattr(self, 'lbl_estado_torneo'): return
+        
+        if getattr(self, "torneo_cerrado_en_db", False):
+            self.lbl_estado_torneo.config(text="🏆 Torneo Finalizado", foreground="#28a745")
+            return
+            
+        total_divs = sum(len(p) for p in self.datos.values())
+        bloqueadas = len(self.divisiones_bloqueadas)
+        
+        # CASO 1: Faltan llaves por confirmar
+        if bloqueadas < total_divs:
+            faltan = total_divs - bloqueadas
+            self.lbl_estado_torneo.config(text=f"⚠️ Faltan {faltan} llaves por confirmar", foreground="#f39c12")
+            return
+            
+        # CASO 2: Torneo Corriendo (Todas las llaves listas)
+        total_peleas = 0
+        completadas = 0
+        pendientes = []
+        
+        for llave_key, grid in self.grids_generados.items():
+            rondas_totales_bracket = len(grid) - 1 # El tamaño total del bracket
+            for r in range(1, len(grid)):
+                for node in grid[r]:
+                    if isinstance(node, dict) and node.get("tipo") == "combate":
+                        total_peleas += 1
+                        if node.get("ganador"):
+                            completadas += 1
+                        else:
+                            pendientes.append({
+                                "ronda": node["ronda"],
+                                "distancia": rondas_totales_bracket - node["ronda"]
+                            })
+        
+        faltan = total_peleas - completadas
+        
+        if faltan == 0:
+            self.lbl_estado_torneo.config(text=f"Peleas: {total_peleas} | Completadas: {completadas} | Faltan: 0 | Listo para Cerrar", foreground="#28a745")
+        else:
+            # Encontrar la ronda más baja en la que hay peleas pendientes
+            ronda_actual = min(p["ronda"] for p in pendientes)
+            restantes_ronda = sum(1 for p in pendientes if p["ronda"] == ronda_actual)
+            
+            # Buscar el bracket más grande involucrado para darle nombre a la fase
+            max_dist = max(p["distancia"] for p in pendientes if p["ronda"] == ronda_actual)
+            
+            if max_dist == 0: nombre_fase = "Finales"
+            elif max_dist == 1: nombre_fase = "Semifinales"
+            elif max_dist == 2: nombre_fase = "Cuartos de final"
+            elif max_dist == 3: nombre_fase = "Octavos de final"
+            else: nombre_fase = "Eliminatorias"
+            
+            texto = f"Peleas: {total_peleas} | Completadas: {completadas} | Faltan: {faltan}  |  Fase: {nombre_fase} (Ronda {ronda_actual}, {restantes_ronda} restantes)"
+            self.lbl_estado_torneo.config(text=texto, foreground="#17a2b8")
+
+    def exportar_todas_las_fichas_pdf(self):
+        """Exporta todas las hojas de anotación de combates finalizados a una carpeta."""
+        if not PDF_DISPONIBLE: 
+            return messagebox.showerror("Error", "PyMuPDF no está instalada.")
+            
+        dir_padre = filedialog.askdirectory(title="Seleccione dónde crear la carpeta de Fichas PDF")
+        if not dir_padre: return
+
+        # Chequear si la carpeta ya existe y usarla, si no, crearla
+        nombre_carpeta = f"Torneo_{self.id_torneo}_Fichas_PDF"
+        ruta_final = os.path.join(dir_padre, nombre_carpeta)
+        if not os.path.exists(ruta_final): 
+            os.makedirs(ruta_final)
+
+        exitos = 0
+        # Recorrer todas las llaves generadas buscando combates terminados
+        for llave_key, grid in self.grids_generados.items():
+            estilo, peso = llave_key.split("-")
+            
+            for r in grid:
+                for node in r:
+                    # Validar que es un combate y que tiene un ganador definido
+                    if isinstance(node, dict) and node.get("tipo") == "combate" and node.get("ganador"):
+                        p_rojo = self.obtener_peleador_real(node["peleador_rojo"])
+                        p_azul = self.obtener_peleador_real(node["peleador_azul"])
+                        
+                        if p_rojo and p_azul:
+                            apellido_rojo = p_rojo['nombre'].split(',')[0].replace(' ', '_')
+                            apellido_azul = p_azul['nombre'].split(',')[0].replace(' ', '_')
+                            nombre_archivo = f"R{node['ronda']}_{estilo}_{peso}_{apellido_rojo}_vs_{apellido_azul}.pdf".replace(" ", "_")
+                            ruta_pdf = os.path.join(ruta_final, nombre_archivo)
+                            
+                            # Llamamos al exportador individual de forma silenciosa
+                            self.exportar_pdf(node, estilo, peso, ruta_directa=ruta_pdf)
+                            exitos += 1
+                            
+        if exitos > 0:
+            messagebox.showinfo("Proceso Terminado", f"Se exportaron exitosamente {exitos} hojas de anotación en:\n{ruta_final}")
+        else:
+            messagebox.showinfo("Aviso", "No hay combates finalizados para exportar.")
+
     def verificar_visibilidad_confirmar_todas(self):
+        if not hasattr(self, 'btn_confirmar_todas'): return
+        
         total_divs = sum(len(p) for p in self.datos.values())
         if len(self.divisiones_bloqueadas) >= total_divs and total_divs > 0:
             self.btn_confirmar_todas.pack_forget()
+        else:
+            # Si faltan llaves y el botón estaba oculto, lo volvemos a mostrar
+            if not self.btn_confirmar_todas.winfo_ismapped():
+                # 'after' lo coloca exactamente a la derecha del botón regresar
+                self.btn_confirmar_todas.pack(side="left", padx=5, after=self.btn_regresar)
 
     def confirmar_todas_las_llaves(self):
         """Bloquea todas las divisiones del torneo de un solo golpe."""
@@ -87,58 +211,124 @@ class PantallaPareo(ttk.Frame):
                     # Llamamos a tu lógica de bloqueo (pasar mostrar_msg=False para evitar spam de alertas)
                     self.bloquear_llave(estilo, peso, mostrar_msg=False)
             messagebox.showinfo("Éxito", "Todas las llaves han sido bloqueadas.")
-            self.btn_confirmar_todas.pack_forget()
+
+            # Refrescar la vista actual para reordenar botones de las pestañas
+            for tab in self.notebook.winfo_children():
+                if hasattr(tab, "cmb_peso"):
+                    self.procesar_y_dibujar(tab)
+
+            # --- CORRECCIÓN: Llamamos al gestor para que aparezcan los botones de Exportar ---
+            self.gestionar_botones_globales()
 
     def exportar_imagen_llave(self, tab=None, ruta_directa=None):
-        """Exporta la llave completa con márgenes simétricos y alta nitidez."""
+        """Exporta la llave horneando el fondo y muestreando su color para eliminar bordes residuales."""
         if not tab: tab = self.notebook.nametowidget(self.notebook.select())
-        
         tab.canvas.update()
         
-        # --- CAMBIO: Leemos el margen perfecto que ya le dimos a la interfaz visual ---
         region = tab.canvas.cget("scrollregion")
         if not region: return False
         
-        # Extraemos las coordenadas calculadas (min_x, min_y, max_x, max_y)
         x1, y1, x2, y2 = map(int, region.split())
         ancho, alto = (x2 - x1), (y2 - y1)
-        
         estilo = getattr(tab, "estilo", "Estilo")
         peso = tab.cmb_peso.get() or "Peso"
         
         if not ruta_directa:
             ruta_directa = filedialog.asksaveasfilename(
-                defaultextension=".png",
-                filetypes=[("Imagen PNG", "*.png")],
+                defaultextension=".png", filetypes=[("Imagen PNG", "*.png")],
                 initialfile=f"Llave_{estilo}_{peso}.png"
             )
         if not ruta_directa: return False
 
         ps_temp = f"temp_export_{self.id_torneo}.ps"
+        
+        # --- 1. HORNEADO DE FONDO EXTENDIDO ---
+        # Creamos un rectángulo gigante del mismo gris oscuro para tapar el "papel" de Ghostscript
+        bg_color_hex = "#1e1e1e"
+        bg_rect = tab.canvas.create_rectangle(x1-200, y1-200, x2+200, y2+200, 
+                                              fill=bg_color_hex, outline=bg_color_hex, width=2)
+        tab.canvas.tag_lower(bg_rect)
+
         try:
-            # Captura usando las coordenadas exactas del scrollregion
-            tab.canvas.postscript(
-                file=ps_temp, colormode='color',
-                x=x1, y=y1, 
-                width=ancho, height=alto,
-                pagewidth=ancho, pageheight=alto
-            )
+            tab.canvas.postscript(file=ps_temp, colormode='color', x=x1, y=y1, 
+                                  width=ancho, height=alto, pagewidth=ancho, pageheight=alto)
             
+            # Limpiamos el canvas inmediatamente para no afectar la UI
+            tab.canvas.delete(bg_rect)
+
             with Image.open(ps_temp) as img:
                 img.load(scale=4) 
+                img = img.convert("RGB") # Convertimos a RGB puro
                 
-                fondo_final = Image.new("RGB", img.size, COLOR_FONDO_UI)
+                # --- 2. RECORTE DE SEGURIDAD (Corta el marco blanco) ---
+                # Cortamos 15 píxeles por lado. Como tenemos 60px de margen en la UI (que son 240px a scale=4), 
+                # no tocaremos las casillas, pero amputamos cualquier borde raro de Ghostscript.
+                recorte = 15
+                img = img.crop((recorte, recorte, img.width - recorte, img.height - recorte))
                 
-                if img.mode == 'RGBA':
-                    fondo_final.paste(img, (0, 0), img.split()[3])
-                else:
-                    fondo_final.paste(img)
+                # --- 3. MUESTREO DE COLOR (El gotero) ---
+                # Tomamos el color exacto que renderizó Ghostscript tomando un pixel de la esquina superior.
+                # Esto garantiza que el lienzo se fusione perfectamente sin dejar líneas divisorias.
+                color_fondo_real = img.getpixel((10, 10))
+
+                # 4. Consultar Información del Torneo
+                torneo_info = {"nombre": "Torneo", "lugar": "", "ciudad": "", "fecha": ""}
+                conexion = self.db.conectar()
+                if conexion:
+                    try:
+                        with conexion.cursor() as cur:
+                            cur.execute("""
+                                SELECT t.nombre, t.lugar_exacto, ciu.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY') 
+                                FROM torneo t LEFT JOIN ciudad ciu ON t.id_ciudad = ciu.id 
+                                WHERE t.id = %s
+                            """, (self.id_torneo,))
+                            res = cur.fetchone()
+                            if res: torneo_info = {"nombre": res[0], "lugar": res[1] or "", "ciudad": res[2] or "", "fecha": res[3] or ""}
+                    finally: conexion.close()
+
+                # 5. Crear Lienzo Final con el color muestreado
+                margen_top, margen_bottom, margen_x = 220, 150, 100
+                final_w = max(img.width + (margen_x * 2), 1400)
+                final_h = img.height + margen_top + margen_bottom
                 
-                fondo_final.save(ruta_directa, "PNG", dpi=(300, 300))
+                lienzo = Image.new("RGB", (final_w, final_h), color_fondo_real)
+                
+                # Pegar imagen centrada
+                offset_x = (final_w - img.width) // 2
+                lienzo.paste(img, (offset_x, margen_top))
+                
+                draw = ImageDraw.Draw(lienzo)
+                
+                # 6. Rótulos Oficiales
+                try:
+                    font_titulo = ImageFont.truetype("arialbd.ttf", 65)
+                    font_sub = ImageFont.truetype("arial.ttf", 38)
+                    font_cat = ImageFont.truetype("arialbd.ttf", 55)
+                except:
+                    font_titulo = font_sub = font_cat = ImageFont.load_default()
+
+                def escribir_derecha(texto, y, font, color):
+                    bbox_t = draw.textbbox((0, 0), texto, font=font)
+                    tw = bbox_t[2] - bbox_t[0]
+                    draw.text((lienzo.width - tw - 80, y), texto, font=font, fill=color)
+
+                escribir_derecha(torneo_info['nombre'].upper(), 45, font_titulo, "white")
+                ubicacion = f"{torneo_info['lugar']}, {torneo_info['ciudad']}" if torneo_info['ciudad'] else torneo_info['lugar']
+                escribir_derecha(f"{ubicacion}  |  {torneo_info['fecha']}", 130, font_sub, "#aaaaaa")
+                
+                cat_peso_txt = f"{estilo.upper()} - {peso}"
+                bbox_c = draw.textbbox((0, 0), cat_peso_txt, font=font_cat)
+                escribir_derecha(cat_peso_txt, lienzo.height - (bbox_c[3]-bbox_c[1]) - 70, font_cat, "#ffc107")
+
+                # 7. Guardar
+                lienzo.save(ruta_directa, "PNG", dpi=(300, 300))
             
             if os.path.exists(ps_temp): os.remove(ps_temp)
             return True
+            
         except Exception as e:
+            if 'bg_rect' in locals(): tab.canvas.delete(bg_rect)
+            if os.path.exists(ps_temp): os.remove(ps_temp)
             messagebox.showerror("Error", f"Fallo al crear imagen: {e}")
             return False
 
@@ -166,8 +356,21 @@ class PantallaPareo(ttk.Frame):
         messagebox.showinfo("Proceso Terminado", f"Imágenes guardadas en:\n{ruta_final}")
 
     def regresar_a_inscripcion(self):
-        """Regresa a la pantalla de inscripción manteniendo el torneo actual en memoria."""
+        """Regresa a la pantalla de inscripción forzando una actualización de su estado."""
+        
+        # --- NUEVO: Cerrar panel de combate flotante si estaba abierto ---
+        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
+            self.panel_combate.destroy()
+            
         from pantalla_inscripcion import PantallaInscripcion
+        
+        # Obtener la instancia activa de la pantalla de inscripción
+        p_inscripcion = self.controller.pantallas.get(PantallaInscripcion)
+        
+        # Forzar el refresco de bloqueos antes de mostrarla
+        if p_inscripcion:
+            p_inscripcion.refrescar_estado_bloqueos()
+            
         self.controller.mostrar_pantalla(PantallaInscripcion)
 
     def cargar_torneo(self, id_torneo):
@@ -226,6 +429,9 @@ class PantallaPareo(ttk.Frame):
         # --- VERIFICAR SI EL TORNEO YA ESTÁ FINALIZADO ---
         self.verificar_estado_torneo()
 
+        # --- NUEVA LÍNEA: Revisar visibilidad del botón al cargar ---
+        self.gestionar_botones_globales()
+
     def pre_cargar_memoria(self):
         """Genera el grid de todas las llaves sin necesidad de visualizarlas."""
         self.divisiones_bloqueadas.clear()
@@ -274,6 +480,9 @@ class PantallaPareo(ttk.Frame):
 
     def verificar_estado_torneo(self):
         """Mantiene el botón en Rojo hasta que el usuario cierre el torneo manualmente."""
+        # --- NUEVO: Dispara la actualización de la etiqueta superior en tiempo real ---
+        self.actualizar_estado_torneo()
+
         # Si ya se cerró y se guardó en la BD, se queda en modo Exportar (Verde)
         if getattr(self, "torneo_cerrado_en_db", False):
             self.btn_cerrar_torneo.config(text="📄 EXPORTAR REPORTE PDF", bg="#28a745", command=self.generar_reporte_pdf)
@@ -340,6 +549,10 @@ class PantallaPareo(ttk.Frame):
         self.btn_cerrar_torneo.pack(pady=15, ipadx=15, ipady=8)
 
     def al_cambiar_pestana(self, event):
+        # --- NUEVO: Cerrar panel si el usuario cambia de pestaña ---
+        if hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
+            self.panel_combate.destroy()
+            
         # Si el usuario selecciona la pestaña de Cartelera (índice 0), la actualizamos
         if self.notebook.index(self.notebook.select()) == 0:
             self.actualizar_cartelera()
@@ -476,10 +689,6 @@ class PantallaPareo(ttk.Frame):
         top_frame = ttk.Frame(tab)
         top_frame.pack(fill="x", pady=5)
 
-        btn_img = ttk.Button(top_frame, text="📸 Exportar Imagen", 
-                             command=lambda t=tab: self.exportar_imagen_llave(t))
-        btn_img.pack(side="right", padx=10)
-
         ttk.Label(top_frame, text="División de Peso:").pack(side="left", padx=5)
         
         # --- SOLUCIÓN: ORDENAR LOS PESOS MATEMÁTICAMENTE (Menor a Mayor) ---
@@ -489,8 +698,10 @@ class PantallaPareo(ttk.Frame):
         cmb_peso.pack(side="left", padx=5)
         cmb_peso.set(lista_pesos[0]) # Seleccionar el primero por defecto
 
-        tab.btn_confirmar = ttk.Button(top_frame, text="Confirmar y Bloquear Llave", command=lambda: self.bloquear_llave(estilo, cmb_peso.get()))
-        # (El empaquetado del botón confirmar se maneja dinámicamente en procesar_y_dibujar)
+        # --- BOTONES DE LA PESTAÑA (No se empaquetan aquí, se hace dinámicamente) ---
+        tab.btn_img = ttk.Button(top_frame, text="📸 Exportar Llave (PNG)", command=lambda t=tab: self.exportar_imagen_llave(t))
+        tab.btn_confirmar = ttk.Button(top_frame, text="Confirmar Llave", command=lambda: self.bloquear_llave(estilo, cmb_peso.get()))
+        tab.btn_confirmar_todas = ttk.Button(top_frame, text="✅ Confirmar Todas las Llaves", command=self.confirmar_todas_las_llaves)
 
         # ================= ¡AQUÍ ESTABA EL BLOQUE PERDIDO! =================
         # Lienzo (Canvas) y sus barras de desplazamiento clásicas
@@ -557,17 +768,32 @@ class PantallaPareo(ttk.Frame):
         peso = tab.cmb_peso.get()
         llave_key = f"{estilo}-{peso}"
 
-        # Ahora determinamos el modo de edición basándonos en si la memoria lo marcó como bloqueado
-        if llave_key in self.divisiones_bloqueadas:
+        total_divs = sum(len(p) for p in self.datos.values())
+        todas_bloqueadas = (len(self.divisiones_bloqueadas) >= total_divs) and (total_divs > 0)
+
+        # 1. Ocultar todos los botones primero para evitar duplicados o mal orden
+        if hasattr(tab, 'btn_img'): tab.btn_img.pack_forget()
+        if hasattr(tab, 'btn_confirmar'): tab.btn_confirmar.pack_forget()
+        if hasattr(tab, 'btn_confirmar_todas'): tab.btn_confirmar_todas.pack_forget()
+
+        # 2. Lógica de visibilidad y orden de derecha a izquierda
+        if todas_bloqueadas:
             self.modo_edicion = False
-            if hasattr(tab, 'btn_confirmar'):
-                tab.btn_confirmar.pack_forget() 
+            # Torneo completo: Solo aparece exportar imagen
+            if hasattr(tab, 'btn_img'): tab.btn_img.pack(side="right", padx=10)
         else:
-            self.modo_edicion = True
-            if hasattr(tab, 'btn_confirmar'):
-                tab.btn_confirmar.pack(side="right", padx=20) 
+            if llave_key in self.divisiones_bloqueadas:
+                self.modo_edicion = False
+                # Llave confirmada: Solo aparece confirmar todas a la derecha
+                if hasattr(tab, 'btn_confirmar_todas'): tab.btn_confirmar_todas.pack(side="right", padx=10)
+            else:
+                self.modo_edicion = True
+                # Llave abierta: Aparece confirmar a la derecha, y a su izquierda confirmar todas
+                if hasattr(tab, 'btn_confirmar'): tab.btn_confirmar.pack(side="right", padx=10)
+                if hasattr(tab, 'btn_confirmar_todas'): tab.btn_confirmar_todas.pack(side="right", padx=5)
 
         self.dibujar_llave(tab.canvas, self.llaves_generadas[llave_key], llave_key)
+        self.gestionar_botones_globales()
         
     def generar_pareo_optimo(self, atletas):
         """Algoritmo Seeding: Separa clubes y fuerza a los impares (Byes) hacia arriba."""
@@ -784,7 +1010,7 @@ class PantallaPareo(ttk.Frame):
     def on_canvas_click(self, event, tab):
         canvas = tab.canvas
         x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
-        llave_key = f"{tab.estilo}-{tab.cmb_peso.get()}" # <- Necesario aquí
+        llave_key = f"{tab.estilo}-{tab.cmb_peso.get()}" 
         
         if self.modo_edicion:
             for (x1, y1, x2, y2, idx) in canvas.cajas_clickable:
@@ -801,12 +1027,18 @@ class PantallaPareo(ttk.Frame):
                     self.dibujar_llave(canvas, self.llaves_generadas[llave_key], llave_key)
                     return
         else:
+            clic_en_combate = False
             for (x1, y1, x2, y2, match_node) in getattr(canvas, 'combates_clickable', []):
                 if x1 <= x <= x2 and y1 <= y <= y2:
                     x_root = canvas.winfo_rootx() + x1 - canvas.canvasx(0)
                     y_root = canvas.winfo_rooty() + y2 - canvas.canvasy(0)
                     self.abrir_ventana_combate(match_node, tab, x_root, y_root, llave_key)
-                    return
+                    clic_en_combate = True
+                    break
+            
+            # --- NUEVO: Si hizo clic en un espacio vacío del canvas, se cierra el panel ---
+            if not clic_en_combate and hasattr(self, "panel_combate") and self.panel_combate.winfo_exists():
+                self.panel_combate.destroy()
 
     def abrir_ventana_combate(self, match_node, tab, x_root, y_root, llave_key):
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
@@ -824,16 +1056,12 @@ class PantallaPareo(ttk.Frame):
         # Ubicar exactamente 5 píxeles por debajo de la caja de combate
         self.panel_combate.geometry(f"+{int(x_root)}+{int(y_root + 5)}")
         
-        # --- NUEVO ENCABEZADO CON LA "X" CORREGIDA ---
+        # --- NUEVO ENCABEZADO (SIN LA X) ---
         top_bar = tk.Frame(self.panel_combate, bg="#1e1e1e")
         top_bar.pack(fill="x")
         
-        ttk.Label(top_bar, text=f"Detalles del Combate (Ronda {match_node['ronda']})", font=("Helvetica", 10, "bold"), background="#1e1e1e", foreground="white").pack(side="left", padx=10, pady=5)
-        
-        # La X ahora es un Label interactivo (Evita el glitch visual de los botones en Windows)
-        btn_cerrar = tk.Label(top_bar, text="✕", bg="#ff4d4d", fg="white", font=("Helvetica", 11, "bold"), cursor="hand2")
-        btn_cerrar.pack(side="right", ipadx=10, fill="y")
-        btn_cerrar.bind("<Button-1>", lambda e: self.panel_combate.destroy())
+        # El título ahora está centrado automáticamente (quitamos side="left")
+        ttk.Label(top_bar, text=f"Detalles del Combate (Ronda {match_node['ronda']})", font=("Helvetica", 10, "bold"), background="#1e1e1e", foreground="white").pack(pady=5)
         
         # --- CUERPO DEL PANEL ---
         main_frame = ttk.Frame(self.panel_combate, padding=10)
@@ -867,7 +1095,8 @@ class PantallaPareo(ttk.Frame):
         
         if match_node.get("ganador") is not None:
             ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
-            ttk.Button(btn_frame, text="📄 PDF", command=lambda: self.exportar_pdf(match_node, tab)).pack(side="left", padx=5)
+            estilo_ext, peso_ext = llave_key.split("-")
+            ttk.Button(btn_frame, text="📄 PDF", command=lambda: self.exportar_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
         elif p_rojo is not None and p_azul is not None:
             # --- NUEVA REGLA: Validar cierre de todas las llaves ---
             total_divisiones = sum(len(pesos) for pesos in self.datos.values())
@@ -881,11 +1110,15 @@ class PantallaPareo(ttk.Frame):
             ttk.Label(btn_frame, text="Esperando clasificado...", font=("Helvetica", 9, "italic")).pack()
 
     # ================= EXPORTACIÓN A PDF DESDE PAREO =================
-    def exportar_pdf(self, match_node, tab):
-        if not PDF_DISPONIBLE: return messagebox.showerror("Error", "PyMuPDF no está instalada.")
+    def exportar_pdf(self, match_node, estilo, peso, ruta_directa=None): # <-- NUEVOS PARÁMETROS
+        if not PDF_DISPONIBLE: 
+            if not ruta_directa: messagebox.showerror("Error", "PyMuPDF no está instalada.")
+            return
             
         ruta_plantilla = "hoja_anotacion.pdf" 
-        if not os.path.exists(ruta_plantilla): return messagebox.showerror("Error", f"No se encontró '{ruta_plantilla}'.")
+        if not os.path.exists(ruta_plantilla): 
+            if not ruta_directa: messagebox.showerror("Error", f"No se encontró '{ruta_plantilla}'.")
+            return
 
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
@@ -893,15 +1126,21 @@ class PantallaPareo(ttk.Frame):
         id_combate = ganador_data.get("id_combate")
 
         if not id_combate:
-            return messagebox.showerror("Error", "No se encontró el ID del combate. Verifica que esté guardado en la base de datos.")
+            if not ruta_directa: messagebox.showerror("Error", "No se encontró el ID del combate en BD.")
+            return
 
         apellido_rojo = p_rojo['nombre'].split(',')[0].replace(' ', '_')
         apellido_azul = p_azul['nombre'].split(',')[0].replace(' ', '_')
-        ruta_guardado = filedialog.asksaveasfilename(
-            defaultextension=".pdf", filetypes=[("PDF", "*.pdf")],
-            initialfile=f"Hoja_Puntuacion_R{match_node['ronda']}_{apellido_rojo}_vs_{apellido_azul}.pdf"
-        )
-        if not ruta_guardado: return
+        
+        # --- SILENCIAR EL DIÁLOGO SI ES EXPORTACIÓN MASIVA ---
+        if not ruta_directa:
+            ruta_guardado = filedialog.asksaveasfilename(
+                defaultextension=".pdf", filetypes=[("PDF", "*.pdf")],
+                initialfile=f"Hoja_Puntuacion_R{match_node['ronda']}_{apellido_rojo}_vs_{apellido_azul}.pdf"
+            )
+            if not ruta_guardado: return
+        else:
+            ruta_guardado = ruta_directa
 
         # 1. Recuperar los datos del Torneo y hora de fin
         torneo_nombre = ""
@@ -979,8 +1218,8 @@ class PantallaPareo(ttk.Frame):
             y_info = 203
             escribir(torneo_fecha, 90, y_info, size=9)          
             escribir(f"{match_node['match_id']}", 170, y_info, size=9) 
-            escribir(tab.cmb_peso.get(), 240, y_info, size=9)          
-            escribir(tab.estilo, 295, y_info, size=9)                  
+            escribir(peso, 240, y_info, size=9)
+            escribir(estilo, 295, y_info, size=9)                
             escribir(f"{match_node['ronda']}", 375, y_info, size=9) 
             escribir("Fase", 430, y_info, size=9)                           
             escribir("Tapiz A", 495, y_info, size=9)                        
@@ -1086,7 +1325,8 @@ class PantallaPareo(ttk.Frame):
 
             doc.save(ruta_guardado)
             doc.close()
-            messagebox.showinfo("Éxito", f"Hoja técnica exportada correctamente.")
+            if not ruta_directa:
+                messagebox.showinfo("Éxito", f"Hoja técnica exportada correctamente.")
 
         except Exception as e:
             messagebox.showerror("Error", f"Ocurrió un error al generar el PDF:\n{str(e)}")
@@ -1162,6 +1402,9 @@ class PantallaPareo(ttk.Frame):
                 if mostrar_msg:
                     messagebox.showinfo("Bloqueado", "Llave confirmada y asegurada.")
                 self.verificar_estado_torneo()
+                
+                # --- CORRECCIÓN: Evaluar visibilidad de exportaciones ---
+                self.gestionar_botones_globales()
             else:
                 if mostrar_msg:
                     messagebox.showerror("Error", "Error al guardar en la base de datos.")
