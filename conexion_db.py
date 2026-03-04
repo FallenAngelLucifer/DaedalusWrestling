@@ -162,7 +162,7 @@ class ConexionDB:
         query_torneo = """
             SELECT t.nombre, t.lugar_exacto as lugar, ciu.nombre as ciudad_nombre,
                    to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria,
-                   t.fecha_fin
+                   t.fecha_fin, t.num_tapices
             FROM torneo t
             JOIN categoria_edad c ON t.id_categoria_edad = c.id
             LEFT JOIN ciudad ciu ON t.id_ciudad = ciu.id
@@ -205,16 +205,14 @@ class ConexionDB:
         if not conexion: return None
         try:
             with conexion.cursor() as cursor:
-                # 1. Crear torneo con ID de Ciudad
+                num_tapices = datos_torneo.get('num_tapices', 1)
                 cursor.execute("""
-                    INSERT INTO torneo (nombre, id_categoria_edad, lugar_exacto, id_ciudad, fecha_inicio, fecha_fin) 
-                    VALUES (%s, %s, %s, %s, %s, NULL) RETURNING id
-                """, (datos_torneo['nombre'], datos_torneo['id_categoria'], datos_torneo['lugar'], datos_torneo['id_ciudad'], datos_torneo['fecha']))
+                    INSERT INTO torneo (nombre, id_categoria_edad, lugar_exacto, id_ciudad, fecha_inicio, fecha_fin, num_tapices) 
+                    VALUES (%s, %s, %s, %s, %s, NULL, %s) RETURNING id
+                """, (datos_torneo['nombre'], datos_torneo['id_categoria'], datos_torneo['lugar'], datos_torneo['id_ciudad'], datos_torneo['fecha'], num_tapices))
                 id_torneo = cursor.fetchone()[0]
 
-                # 2. Registrar divisiones e inscripciones
-                divisiones_creadas = {} # Cache para no duplicar divisiones
-                
+                divisiones_creadas = {} 
                 for ins in inscripciones:
                     for id_peso_oficial in ins['ids_divisiones']:
                         if id_peso_oficial not in divisiones_creadas:
@@ -259,7 +257,7 @@ class ConexionDB:
     def bloquear_y_guardar_llave(self, id_torneo, nombre_estilo, peso_str, llave_array):
         """Guarda la posición exacta de cada atleta al bloquear la llave."""
         # Limpiar el string "74 kg" para obtener solo el número
-        peso_max = int(peso_str.replace(" kg", "").strip())
+        peso_max = int(peso_str.lower().replace("kg", "").replace(" ", "").strip())
         
         conexion = self.conectar()
         if not conexion: return False
@@ -296,7 +294,7 @@ class ConexionDB:
 
     def cargar_llave_bloqueada(self, id_torneo, nombre_estilo, peso_str, potencia):
         """Si la llave ya fue bloqueada antes, la devuelve ordenada. Si no, devuelve None."""
-        peso_max = int(peso_str.replace(" kg", "").strip())
+        peso_max = int(peso_str.lower().replace("kg", "").replace(" ", "").strip())
         conexion = self.conectar()
         if not conexion: return None
         try:
@@ -339,7 +337,7 @@ class ConexionDB:
             conexion.close()
 
     def guardar_resultado_combate(self, id_torneo, estilo, peso_str, match_id, id_peleador_rojo, id_peleador_azul, id_peleador_ganador, motivo_str, id_arbitro=None, id_juez=None, id_jefe_tapiz=None, puntos_rojo=0, puntos_azul=0, historial=None):
-        peso_max = int(peso_str.replace(" kg", "").strip())
+        peso_max = int(peso_str.lower().replace("kg", "").replace(" ", "").strip())
         codigo_uww = motivo_str.split(" - ")[0].strip() 
         
         conexion = self.conectar()
@@ -424,14 +422,14 @@ class ConexionDB:
             conexion.close()
 
     def cargar_resultados_combates(self, id_torneo):
-        """Carga en memoria todos los combates que ya se jugaron al abrir el torneo."""
+        """Carga en memoria todos los combates jugados o en proceso."""
         conexion = self.conectar()
         if not conexion: return {}
         try:
             with conexion.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
                     SELECT e.nombre as estilo, p.peso_maximo, c.identificador_llave,
-                           c.id as id_combate, c.id_arbitro, c.id_juez, c.id_jefe_tapiz,
+                           c.id as id_combate, c.id_arbitro, c.id_juez, c.id_jefe_tapiz, c.estado,
                            pel.id as id_ganador, pel.nombre, pel.apellidos, 
                            cl.nombre as club, ci.nombre as ciudad,
                            tv.codigo_uww, tv.descripcion as motivo_desc
@@ -444,7 +442,7 @@ class ConexionDB:
                     LEFT JOIN club cl ON pel.id_club = cl.id
                     LEFT JOIN ciudad ci ON cl.id_ciudad = ci.id
                     LEFT JOIN tipo_victoria tv ON c.id_tipo_victoria = tv.id
-                    WHERE td.id_torneo = %s AND c.estado = 'Finalizado' AND c.identificador_llave IS NOT NULL
+                    WHERE td.id_torneo = %s AND c.identificador_llave IS NOT NULL
                 """, (id_torneo,))
                 
                 resultados = cur.fetchall()
@@ -455,22 +453,26 @@ class ConexionDB:
                     if llave_key not in dict_resultados:
                         dict_resultados[llave_key] = {}
                         
-                    motivo = f"{r['codigo_uww']} - {r['motivo_desc']}" if r['codigo_uww'] else "Decisión"
-                    
-                    if r['id_ganador'] is None:
-                        # Es un 2DSQ (No hay ganador en la BD)
-                        dict_resultados[llave_key][r['identificador_llave']] = {
-                            "id": -1, "nombre": "Doble Descalificación", "club": "---", "ciudad": "---",
-                            "motivo_victoria": "2DSQ - Ambos descalificados", "id_combate": r['id_combate'],
-                            "id_arbitro": r['id_arbitro'], "id_juez": r['id_juez'], "id_jefe_tapiz": r['id_jefe_tapiz']
-                        }
+                    if r['estado'] == 'En Proceso':
+                        dict_resultados[llave_key][r['identificador_llave']] = {"estado": "En Proceso"}
                     else:
-                        dict_resultados[llave_key][r['identificador_llave']] = {
-                            "id": r['id_ganador'], "nombre": f"{r['apellidos']}, {r['nombre']}",
-                            "club": r['club'] or "Sin Club", "ciudad": r['ciudad'] or "No especificada",
-                            "motivo_victoria": motivo, "id_combate": r['id_combate'],
-                            "id_arbitro": r['id_arbitro'], "id_juez": r['id_juez'], "id_jefe_tapiz": r['id_jefe_tapiz']
-                        }
+                        motivo = f"{r['codigo_uww']} - {r['motivo_desc']}" if r['codigo_uww'] else "Decisión"
+                        
+                        if r['id_ganador'] is None:
+                            dict_resultados[llave_key][r['identificador_llave']] = {
+                                "id": -1, "nombre": "Doble Descalificación", "club": "---", "ciudad": "---",
+                                "motivo_victoria": "2DSQ - Ambos descalificados", "id_combate": r['id_combate'],
+                                "id_arbitro": r['id_arbitro'], "id_juez": r['id_juez'], "id_jefe_tapiz": r['id_jefe_tapiz'],
+                                "estado": "Finalizado"
+                            }
+                        else:
+                            dict_resultados[llave_key][r['identificador_llave']] = {
+                                "id": r['id_ganador'], "nombre": f"{r['apellidos']}, {r['nombre']}",
+                                "club": r['club'] or "Sin Club", "ciudad": r['ciudad'] or "No especificada",
+                                "motivo_victoria": motivo, "id_combate": r['id_combate'],
+                                "id_arbitro": r['id_arbitro'], "id_juez": r['id_juez'], "id_jefe_tapiz": r['id_jefe_tapiz'],
+                                "estado": "Finalizado"
+                            }
                 return dict_resultados
         except Exception as e:
             print(f"Error cargando resultados de combates: {e}")
@@ -677,3 +679,359 @@ class ConexionDB:
         finally:
             conexion.close()
         return descalificados
+
+    def actualizar_estado_combate(self, id_torneo, estilo, peso_str, match_id, id_peleador_rojo, id_peleador_azul, estado):
+        """Inyecta un combate temporal a la BD para bloquearlo en otras computadoras, o lo borra si se cancela."""
+        peso_max = int(peso_str.lower().replace("kg", "").replace(" ", "").strip())
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                # 1. Obtener el ID de la División
+                cur.execute("""
+                    SELECT td.id FROM torneo_division td
+                    JOIN peso_oficial_uww p ON td.id_peso_oficial_uww = p.id
+                    JOIN estilo_lucha e ON p.id_estilo_lucha = e.id
+                    WHERE td.id_torneo = %s AND e.nombre = %s AND p.peso_maximo = %s
+                """, (id_torneo, estilo, peso_max))
+                res = cur.fetchone()
+                if not res: return False
+                id_td = res[0]
+                
+                # 2. Comprobar si ya alguien lo creó en BD
+                cur.execute("SELECT id FROM combate WHERE id_torneo_division = %s AND identificador_llave = %s", (id_td, match_id))
+                comb_existente = cur.fetchone()
+                
+                if comb_existente:
+                    if estado == "Pendiente":
+                        cur.execute("DELETE FROM combate WHERE id = %s", (comb_existente[0],))
+                    else:
+                        cur.execute("UPDATE combate SET estado = %s WHERE id = %s", (estado, comb_existente[0]))
+                else:
+                    if estado == "En Proceso":
+                        cur.execute("SELECT id FROM inscripcion WHERE id_torneo_division = %s AND id_peleador = %s", (id_td, id_peleador_rojo))
+                        id_ins_rojo = (cur.fetchone() or [None])[0]
+                        cur.execute("SELECT id FROM inscripcion WHERE id_torneo_division = %s AND id_peleador = %s", (id_td, id_peleador_azul))
+                        id_ins_azul = (cur.fetchone() or [None])[0]
+                        
+                        cur.execute("""
+                            INSERT INTO combate (id_torneo_division, id_fase, id_inscripcion_rojo, id_inscripcion_azul, orden_pelea, estado, identificador_llave)
+                            VALUES (%s, (SELECT id FROM fase_combate LIMIT 1), %s, %s, 1, %s, %s)
+                        """, (id_td, id_ins_rojo, id_ins_azul, estado, match_id))
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error actualizando estado combate concurrente: {e}")
+            conexion.rollback()
+            return False
+        finally:
+            conexion.close()
+
+    # =================================================================
+    # --- SISTEMA DE RED Y CONEXIONES (MASTER / CLIENTES) ---
+    # =================================================================
+
+    def verificar_master_existente(self, id_torneo):
+        """Revisa si alguien ya abrió este torneo como Master."""
+        query = "SELECT id, nombre_dispositivo FROM conexiones_torneo WHERE id_torneo = %s AND es_master = TRUE LIMIT 1;"
+        res = self._ejecutar_select(query, (id_torneo,))
+        return res[0] if res else None
+
+    def registrar_conexion_instancia(self, id_torneo, id_oficial, nombre_dispositivo, es_master=False):
+        """Registra una computadora en la sala de espera del torneo."""
+        conexion = self.conectar()
+        if not conexion: return None
+        try:
+            with conexion.cursor() as cur:
+                estado = 'Aprobado' if es_master else 'Esperando'
+                tapiz = 'Tapiz A' if es_master else 'Pendiente'
+                cur.execute("""
+                    INSERT INTO conexiones_torneo (id_torneo, nombre_dispositivo, id_oficial, es_master, tapiz_asignado, estado_conexion)
+                    VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+                """, (id_torneo, nombre_dispositivo, id_oficial, es_master, tapiz, estado))
+                conexion.commit()
+                return cur.fetchone()[0]
+        except Exception as e:
+            print(f"Error registrando instancia de red: {e}")
+            conexion.rollback()
+            return None
+        finally:
+            conexion.close()
+
+    def obtener_conexiones_torneo(self, id_torneo):
+        """Devuelve la lista de computadoras conectadas a este torneo (Para el Master)."""
+        query = """
+            SELECT c.id as id_conexion, c.nombre_dispositivo, c.es_master, 
+                   c.tapiz_asignado, c.estado_conexion,
+                   o.id as id_oficial, o.nombre, o.apellidos
+            FROM conexiones_torneo c
+            JOIN oficial_arbitraje o ON c.id_oficial = o.id
+            WHERE c.id_torneo = %s
+            ORDER BY c.es_master DESC, c.ultima_actividad ASC;
+        """
+        return self._ejecutar_select(query, (id_torneo,))
+
+    def asignar_tapiz_a_cliente(self, id_conexion, tapiz_asignado):
+        """El Master aprueba a un cliente y le da un Tapiz."""
+        return self._ejecutar_insert("""
+            UPDATE conexiones_torneo 
+            SET tapiz_asignado = %s, estado_conexion = 'Aprobado', ultima_actividad = CURRENT_TIMESTAMP 
+            WHERE id = %s
+        """, (tapiz_asignado, id_conexion))
+
+    def rechazar_conexion_cliente(self, id_conexion):
+        return self._ejecutar_insert("UPDATE conexiones_torneo SET estado_conexion = 'Rechazado' WHERE id = %s", (id_conexion,))
+
+    def ping_actividad_conexion(self, id_conexion):
+        """Mantiene viva la sesión (Latido)."""
+        return self._ejecutar_insert("UPDATE conexiones_torneo SET ultima_actividad = CURRENT_TIMESTAMP WHERE id = %s", (id_conexion,))
+    
+    def verificar_estado_mi_conexion(self, id_conexion):
+        """El Cliente pregunta si el Master lo aprobó, y si sigue siendo Master."""
+        query = "SELECT tapiz_asignado, estado_conexion, es_master FROM conexiones_torneo WHERE id = %s;"
+        res = self._ejecutar_select(query, (id_conexion,))
+        return res[0] if res else None
+
+    def verificar_master_activo(self, id_torneo):
+        """Devuelve el nombre del dispositivo del Master actual."""
+        conexion = self.conectar()
+        if not conexion: return None
+        try:
+            with conexion.cursor() as cursor:
+                cursor.execute("""
+                    SELECT nombre_dispositivo 
+                    FROM conexiones_torneo 
+                    WHERE id_torneo = %s AND es_master = TRUE
+                    LIMIT 1
+                """, (id_torneo,))
+                resultado = cursor.fetchone()
+                if resultado:
+                    return resultado['nombre_dispositivo'] if isinstance(resultado, dict) else resultado[0]
+                return None
+        except Exception as e:
+            print(f"Error al verificar master: {e}")
+            return None
+        finally:
+            conexion.close()
+
+    def eliminar_conexion_instancia(self, id_conexion):
+        """Elimina la conexión, hereda el Máster si es necesario y reorganiza los tapices para no dejar huecos."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                # 1. Obtener ID del torneo antes de borrar
+                cur.execute("SELECT id_torneo FROM conexiones_torneo WHERE id = %s", (id_conexion,))
+                res = cur.fetchone()
+                if not res: return False
+                id_torneo = res[0]
+
+                # 2. Borrar la conexión de la persona que se fue
+                cur.execute("DELETE FROM conexiones_torneo WHERE id = %s", (id_conexion,))
+
+                # 3. Reorganizar tapices y heredar Master
+                cur.execute("""
+                    SELECT id, estado_conexion 
+                    FROM conexiones_torneo 
+                    WHERE id_torneo = %s 
+                    ORDER BY estado_conexion ASC, tapiz_asignado ASC, id ASC
+                """, (id_torneo,))
+                restantes = cur.fetchall()
+
+                if restantes:
+                    ascii_letra = 65 # Empezar en 'A'
+                    for idx, row in enumerate(restantes):
+                        conn_id = row[0]
+                        estado = row[1]
+                        nuevo_es_master = (idx == 0) # El primero de la lista hereda el trono
+                        
+                        if nuevo_es_master:
+                            nuevo_tapiz = f"Tapiz {chr(ascii_letra)}"
+                            nuevo_estado = 'Aprobado'
+                            ascii_letra += 1
+                        else:
+                            nuevo_estado = estado
+                            if estado == 'Aprobado':
+                                nuevo_tapiz = f"Tapiz {chr(ascii_letra)}"
+                                ascii_letra += 1
+                            else:
+                                nuevo_tapiz = 'Pendiente'
+                                
+                        cur.execute("""
+                            UPDATE conexiones_torneo 
+                            SET es_master = %s, tapiz_asignado = %s, estado_conexion = %s
+                            WHERE id = %s
+                        """, (nuevo_es_master, nuevo_tapiz, nuevo_estado, conn_id))
+                
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error al eliminar conexión y reorganizar: {e}")
+            conexion.rollback()
+            return False
+        finally:
+            conexion.close()
+
+    def limpiar_conexiones_muertas(self, id_torneo):
+        """Busca conexiones inactivas por más de 6 segundos y las elimina automáticamente."""
+        conexion = self.conectar()
+        if not conexion: return
+        try:
+            with conexion.cursor() as cur:
+                cur.execute("""
+                    SELECT id FROM conexiones_torneo 
+                    WHERE id_torneo = %s AND CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '6 seconds'
+                """, (id_torneo,))
+                muertos = cur.fetchall()
+        except Exception as e:
+            print(f"Error buscando fantasmas: {e}")
+            muertos = []
+        finally:
+            conexion.close()
+
+        for m in muertos:
+            self.eliminar_conexion_instancia(m[0]) # La eliminación detona la herencia
+
+    # =================================================================
+    # --- SISTEMA DE PRESENCIA GLOBAL (LOGIN DE LA APP) ---
+    # =================================================================
+
+    def registrar_sesion_app(self, id_oficial, nombre_dispositivo):
+        """Registra que un árbitro acaba de iniciar sesión en el menú principal."""
+        query = """
+            INSERT INTO sesion_app (id_oficial, nombre_dispositivo, ultima_actividad)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (id_oficial) DO UPDATE 
+            SET nombre_dispositivo = EXCLUDED.nombre_dispositivo, ultima_actividad = CURRENT_TIMESTAMP;
+        """
+        return self._ejecutar_insert(query, (id_oficial, nombre_dispositivo))
+
+    def eliminar_sesion_app(self, id_oficial):
+        """Borra la sesión global cuando el usuario cierra sesión o cierra el programa."""
+        return self._ejecutar_insert("DELETE FROM sesion_app WHERE id_oficial = %s", (id_oficial,))
+
+    def ping_sesion_app(self, id_oficial):
+        """Mantiene viva la sesión global en la base de datos (Latido de la App)."""
+        return self._ejecutar_insert("UPDATE sesion_app SET ultima_actividad = CURRENT_TIMESTAMP WHERE id_oficial = %s", (id_oficial,))
+
+    def verificar_oficial_en_uso(self, id_oficial):
+        """Verifica si el oficial ya está logueado en la app en otra computadora."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                # 1. El Cazafantasmas Global: Limpia a los que cerraron forzosamente hace > 6 segundos
+                cur.execute("DELETE FROM sesion_app WHERE CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '6 seconds'")
+                conexion.commit()
+                
+                # 2. Verificamos si, después de limpiar, el oficial solicitado sigue vivo
+                cur.execute("SELECT id_oficial FROM sesion_app WHERE id_oficial = %s", (id_oficial,))
+                return True if cur.fetchone() else False
+        except Exception as e:
+            print(f"Error verificando uso de oficial: {e}")
+            return False
+        finally:
+            conexion.close()
+
+    def actualizar_oficial_conexion(self, id_conexion, id_oficial_nuevo):
+        """Actualiza el ID del oficial en una conexión existente (Cambio rápido de árbitro)."""
+        return self._ejecutar_insert("UPDATE conexiones_torneo SET id_oficial = %s WHERE id = %s", (id_oficial_nuevo, id_conexion))
+
+    # =================================================================
+    # --- SISTEMA DE CANDADOS EN RED (COMBATES EN CURSO) ---
+    # =================================================================
+    def marcar_combate_en_curso(self, id_torneo, llave_key, match_id, tapiz):
+        """Bloquea un combate para que ningún otro tapiz pueda abrirlo."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS combates_activos (
+                        id_torneo INT, llave_key VARCHAR(100), match_id VARCHAR(50), tapiz VARCHAR(50),
+                        PRIMARY KEY (id_torneo, llave_key, match_id)
+                    );
+                """)
+                cur.execute("""
+                    INSERT INTO combates_activos (id_torneo, llave_key, match_id, tapiz) 
+                    VALUES (%s, %s, %s, %s) 
+                    ON CONFLICT (id_torneo, llave_key, match_id) DO UPDATE SET tapiz = EXCLUDED.tapiz;
+                """, (id_torneo, llave_key, match_id, tapiz))
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error bloqueando combate: {e}")
+            return False
+        finally:
+            conexion.close()
+
+    def liberar_combate_en_curso(self, id_torneo, llave_key, match_id):
+        """Suelta el candado de un combate (porque terminó o se canceló)."""
+        return self._ejecutar_insert("DELETE FROM combates_activos WHERE id_torneo = %s AND llave_key = %s AND match_id = %s;", (id_torneo, llave_key, match_id))
+
+    def obtener_combates_en_curso(self, id_torneo):
+        """Devuelve un diccionario con todos los combates que están siendo operados en la red."""
+        query = "SELECT llave_key, match_id, tapiz FROM combates_activos WHERE id_torneo = %s;"
+        try:
+            res = self._ejecutar_select(query, (id_torneo,))
+            activos = {}
+            if res:
+                for r in res:
+                    if r['llave_key'] not in activos: activos[r['llave_key']] = {}
+                    activos[r['llave_key']][r['match_id']] = r['tapiz']
+            return activos
+        except Exception:
+            return {}
+
+    def transferir_master(self, id_torneo, id_nuevo_master):
+        """Transfiere los privilegios de Máster a otro usuario conectado."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                # 1. Quitar privilegios a todos en la sala (Tabla real: conexiones_torneo)
+                cur.execute("UPDATE conexiones_torneo SET es_master = FALSE WHERE id_torneo = %s;", (id_torneo,))
+                # 2. Dar privilegios al nuevo Máster y asegurar que esté aprobado
+                cur.execute("UPDATE conexiones_torneo SET es_master = TRUE, estado_conexion = 'Aprobado' WHERE id = %s AND id_torneo = %s;", (id_nuevo_master, id_torneo))
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error al transferir Máster: {e}")
+            return False
+        finally:
+            conexion.close()
+
+    def heredar_master(self, id_torneo, id_mi_conexion):
+        """Verifica si la sala no tiene Máster y, de ser así, asume el control automáticamente."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                # 1. Comprobamos si no hay nadie con la corona en esta sala
+                cur.execute("SELECT id FROM conexiones_torneo WHERE id_torneo = %s AND es_master = TRUE;", (id_torneo,))
+                if not cur.fetchone():
+                    # 2. Si está vacía, me pongo la corona
+                    cur.execute("UPDATE conexiones_torneo SET es_master = TRUE, estado_conexion = 'Aprobado' WHERE id = %s;", (id_mi_conexion,))
+                    conexion.commit()
+                    return True
+                return False
+        except Exception as e:
+            print(f"Error heredando Máster: {e}")
+            return False
+        finally:
+            conexion.close()
+
+    def mantener_latido_conexion(self, id_conexion):
+        """Actualiza la marca de tiempo para evitar ser eliminado por el limpiador de fantasmas."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                cur.execute("UPDATE conexiones_torneo SET ultima_actividad = CURRENT_TIMESTAMP WHERE id = %s;", (id_conexion,))
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error en latido de red: {e}")
+            return False
+        finally:
+            conexion.close()

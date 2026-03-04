@@ -2,9 +2,12 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import math
 import os
+import json
 from PIL import Image, EpsImagePlugin, ImageDraw, ImageFont
 from conexion_db import ConexionDB
 from utilidades import ComboBuscador
+from ventana_previsualizacion_pdf import VentanaPrevisualizacionPDF
+from ventana_login_red import VentanaLoginRed
 
 # --- COLOR ORIGINAL DEL FONDO ---
 COLOR_FONDO_UI = (30, 30, 30) # Corresponde a #1e1e1e en RGB
@@ -225,8 +228,11 @@ class PantallaPareo(ttk.Frame):
                 if hasattr(tab, "cmb_peso"):
                     self.procesar_y_dibujar(tab)
 
-            # --- CORRECCIÓN: Llamamos al gestor para que aparezcan los botones de Exportar ---
             self.gestionar_botones_globales()
+            
+            # ---> NUEVO: Forzamos la reconstrucción de la memoria antes de dibujar <---
+            self.pre_cargar_memoria()
+            self.actualizar_cartelera()
 
     def exportar_imagen_llave(self, tab=None, ruta_directa=None):
         """Exporta la llave horneando el fondo y muestreando su color para eliminar bordes residuales."""
@@ -367,45 +373,119 @@ class PantallaPareo(ttk.Frame):
 
         messagebox.showinfo("Proceso Terminado", f"Imágenes guardadas en:\n{ruta_final}")
 
+    def cargar_config_pdf(self):
+        ruta_config = "config_pdf.json"
+        
+        # Estructura maestra que incluye estilos y los "saltos" matemáticos para matrices
+        def estilo(coords, size=9, align="Izquierda", bold=False, color="#000000", step_x=0, step_y=0):
+            return {"coords": coords, "align": align, "valign": "Medio", "font": "Helvetica", "size": size, "bold": bold, "italic": False, "underline": False, "color": color, "step_x": step_x, "step_y": step_y}
+
+        defaults = {
+            "torneo_box": estilo([65, 120, 310, 150], 10, "Centro", True), 
+            "arbitro_nom": estilo([360, 105, 540, 125], 8), "arbitro_id": estilo([550, 105, 580, 125], 8, "Centro"),
+            "juez_nom": estilo([360, 128, 540, 148], 8), "juez_id": estilo([550, 128, 580, 148], 8, "Centro"),
+            "jefe_nom": estilo([360, 150, 540, 170], 8), "jefe_id": estilo([550, 150, 580, 170], 8, "Centro"),
+            "fecha": estilo([65, 193, 130, 213], 9, "Centro"), "match_id": estilo([135, 193, 205, 213], 9, "Centro"), 
+            "peso": estilo([210, 193, 265, 213], 9, "Centro"), "estilo": estilo([270, 193, 345, 213], 9, "Centro"), 
+            "ronda": estilo([350, 193, 400, 213], 9, "Centro"), "fase": estilo([405, 193, 465, 213], 9, "Centro"), "tapiz": estilo([470, 193, 530, 213], 9, "Centro"),
+            "rojo_nom": estilo([75, 244, 180, 264], 8), "rojo_club": estilo([183, 244, 275, 264], 7), "rojo_id": estilo([280, 244, 305, 264], 8, "Centro"),
+            "azul_nom": estilo([322, 244, 425, 264], 8), "azul_club": estilo([429, 244, 515, 264], 7), "azul_id": estilo([520, 244, 545, 264], 8, "Centro"),
+            
+            # --- NUEVOS CAMPOS: PUNTOS, TOTALES Y CHEQUES ---
+            "pts_r_p1": estilo([110, 278, 125, 298], 10, "Centro", False, "#cc0000", 15, 0),
+            "pts_r_p2": estilo([110, 306, 125, 326], 10, "Centro", False, "#cc0000", 15, 0),
+            "pts_a_p1": estilo([358, 278, 373, 298], 10, "Centro", False, "#0000cc", 15, 0),
+            "pts_a_p2": estilo([358, 306, 373, 326], 10, "Centro", False, "#0000cc", 15, 0),
+            "subtot_r_p1": estilo([260, 278, 285, 298], 11, "Centro", True, "#cc0000"),
+            "subtot_r_p2": estilo([260, 306, 285, 326], 11, "Centro", True, "#cc0000"),
+            "subtot_a_p1": estilo([510, 278, 535, 298], 11, "Centro", True, "#0000cc"),
+            "subtot_a_p2": estilo([510, 306, 535, 326], 11, "Centro", True, "#0000cc"),
+            "total_pts_r": estilo([70, 345, 110, 375], 16, "Centro", True, "#cc0000"),
+            "total_pts_a": estilo([500, 345, 540, 375], 16, "Centro", True, "#0000cc"),
+            "clas_pts_r": estilo([240, 395, 275, 425], 16, "Centro", True, "#cc0000"),
+            "clas_pts_a": estilo([330, 395, 365, 425], 16, "Centro", True, "#0000cc"),
+            "ganador_nom": estilo([75, 435, 250, 460], 11, "Izquierda", True),
+            "hora_fin": estilo([430, 435, 530, 460], 11, "Centro", False),
+            "check_vic": estilo([80, 485, 105, 500], 10, "Centro", False, "#00aa00", 0, 23)
+        }
+        
+        # Corrigiendo el typo de la variable clas_pts_a
+        defaults["clas_pts_a"] = estilo([330, 395, 365, 425], 16, "Centro", True, "#0000cc")
+        
+        if os.path.exists(ruta_config):
+            try:
+                with open(ruta_config, "r", encoding="utf-8") as f:
+                    cargado = json.load(f)
+                    for k, v in cargado.items():
+                        if isinstance(v, list): 
+                            cargado[k] = estilo(v)
+                            if k in defaults: 
+                                cargado[k]["align"] = defaults[k]["align"]
+                                cargado[k]["size"] = defaults[k]["size"]
+                                cargado[k]["bold"] = defaults[k]["bold"]
+                        else:
+                            for prop in ["align", "valign", "font", "size", "bold", "italic", "underline", "color", "step_x", "step_y"]:
+                                if prop not in v: v[prop] = defaults.get(k, estilo(v.get("coords", [0,0,50,20]))).get(prop)
+
+                    defaults.update(cargado)
+            except: pass
+        return defaults
+
+    def guardar_config_pdf(self, config):
+        with open("config_pdf.json", "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
+
     def regresar_a_inscripcion(self):
         """Regresa a la pantalla de inscripción forzando una actualización de su estado."""
+        self.cerrar_panel_combate()
         
-        self.cerrar_panel_combate() # <-- NUEVO
+        # --- NUEVO: Desconectar de la red al salir ---
+        if hasattr(self, 'id_conexion_red'):
+            self.db.eliminar_conexion_instancia(self.id_conexion_red)
             
         from pantalla_inscripcion import PantallaInscripcion
-        
-        # Obtener la instancia activa de la pantalla de inscripción
         p_inscripcion = self.controller.pantallas.get(PantallaInscripcion)
-        
-        # Forzar el refresco de bloqueos antes de mostrarla
         if p_inscripcion:
             p_inscripcion.refrescar_estado_bloqueos()
             
         self.controller.mostrar_pantalla(PantallaInscripcion)
 
     def cargar_torneo(self, id_torneo):
+        """Intercepta la carga para iniciar sesión en la red o bloquear si ya terminó."""
         self.id_torneo = id_torneo
-
-        # --- NUEVO: Verificar si el torneo ya tiene fecha_fin en la BD ---
-        self.torneo_cerrado_en_db = False
+        
+        # Verificar si el torneo está cerrado ANTES de pedir login
         conexion = self.db.conectar()
+        cerrado = False
         if conexion:
             try:
                 with conexion.cursor() as cur:
                     cur.execute("SELECT fecha_fin FROM torneo WHERE id = %s", (self.id_torneo,))
                     res = cur.fetchone()
-                    if res and res[0] is not None:
-                        self.torneo_cerrado_en_db = True
+                    if res and res[0] is not None: cerrado = True
             finally: conexion.close()
+            
+        if cerrado:
+            # Bypass del Login: Entra directo en modo visualización (Sin Master/Guest)
+            self.iniciar_torneo_red(None, False, "Visualización", -1)
+        else:
+            # Torneo activo: Lanza la ventana de login (Para ser Master o Guest)
+            VentanaLoginRed(self, self.id_torneo, self.iniciar_torneo_red)
+
+    def iniciar_torneo_red(self, id_conexion, es_master, tapiz):
+        self.id_conexion_red = id_conexion
+        self.es_master = es_master
+        self.tapiz_asignado = tapiz
+
+        self.escuchando_red = True
+        self.actualizar_bucle_red()
 
         inscripciones = self.db.obtener_inscripciones_pareo(self.id_torneo)
         
-        # 1. Limpiar pantalla anterior y diccionarios
         for widget in self.contenedor_principal.winfo_children(): widget.destroy()
         self.datos.clear()
         self.resultados_combates = self.db.cargar_resultados_combates(self.id_torneo)
 
-        # 2. Agrupar datos por Estilo y Peso
         for ins in inscripciones:
             est = ins['estilo']
             peso = f"{ins['peso_cat']} kg"
@@ -419,12 +499,13 @@ class PantallaPareo(ttk.Frame):
                 "ciudad": ins.get('ciudad', 'No especificada')
             })
 
-        # --- PRECARGAR TODAS LAS LLAVES EN MEMORIA ---
         self.pre_cargar_memoria()
         
-        # 3. Crear Pestañas
-        self.notebook = ttk.Notebook(self.contenedor_principal)
-        self.notebook.pack(fill="both", expand=True, padx=20, pady=10)
+        self.frame_llaves = ttk.Frame(self.contenedor_principal)
+        self.frame_llaves.pack(side="left", fill="both", expand=True)
+
+        self.notebook = ttk.Notebook(self.frame_llaves)
+        self.notebook.pack(fill="both", expand=True, padx=(20, 10), pady=10)
 
         self.tab_cartelera = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_cartelera, text="📋 CARTELERA GENERAL")
@@ -436,11 +517,128 @@ class PantallaPareo(ttk.Frame):
             self.notebook.add(tab, text=estilo)
             self.construir_tab_estilo(tab, estilo, pesos_dict)
             
-        # --- VERIFICAR SI EL TORNEO YA ESTÁ FINALIZADO ---
         self.verificar_estado_torneo()
-
-        # --- NUEVA LÍNEA: Revisar visibilidad del botón al cargar ---
         self.gestionar_botones_globales()
+        self.construir_panel_red()
+
+    # ==========================================================
+    # --- SISTEMA DE RED: PANEL Y BUCLES DE ACTUALIZACIÓN ---
+    # ==========================================================
+    def construir_panel_red(self):
+        self.panel_red = ttk.LabelFrame(self.contenedor_principal, text="🌐 Gestión de Red", width=340)
+        self.panel_red.pack(side="right", fill="y", padx=(0, 20), pady=10)
+        self.panel_red.pack_propagate(False)
+
+        # ESTADO 1: Torneo Finalizado (Se bloquea el apartado)
+        if getattr(self, "torneo_cerrado_en_db", False):
+            ttk.Label(self.panel_red, text="🏆 TORNEO FINALIZADO", font=("Helvetica", 12, "bold"), foreground="#6c757d").pack(pady=(30, 5))
+            ttk.Label(self.panel_red, text="Modo Solo Lectura\nLa conexión de red está desactivada.", justify="center", foreground="#aaaaaa").pack()
+            return
+
+        # ESTADO 2: Torneo Activo
+        # Etiqueta MASTER Fija (Por fuera de la tabla)
+        self.lbl_master_global = ttk.Label(self.panel_red, text="Buscando Master...", font=("Helvetica", 10, "bold"), foreground="#28a745", justify="center")
+        self.lbl_master_global.pack(pady=10)
+        
+        ttk.Separator(self.panel_red, orient="horizontal").pack(fill="x", pady=5)
+        
+        self.lbl_mi_rol = ttk.Label(self.panel_red, text="", font=("Helvetica", 9, "bold"), justify="center")
+        self.lbl_mi_rol.pack(pady=5)
+
+        # TREEVIEW para todos los clientes (lista de guests)
+        # ---> CORRECCIÓN: Se añade la columna 'estado' para que coincida con los datos insertados
+        self.tree_red = ttk.Treeview(self.panel_red, columns=("id", "arbitro", "equipo", "tapiz", "estado"), show="headings", height=8)
+        self.tree_red.heading("id", text="ID")
+        self.tree_red.heading("arbitro", text="Árbitro")
+        self.tree_red.heading("equipo", text="Dispositivo")
+        self.tree_red.heading("tapiz", text="Tapiz")
+        self.tree_red.heading("estado", text="Estado")
+        
+        self.tree_red.column("id", width=30, anchor="center")
+        self.tree_red.column("arbitro", width=100)
+        self.tree_red.column("equipo", width=100)
+        self.tree_red.column("tapiz", width=80, anchor="center")
+        self.tree_red.column("estado", width=0, stretch=tk.NO) # Se mantiene oculta
+        
+        # Fila gris claro para los que están esperando
+        self.tree_red.tag_configure("esperando", background="#e9ecef", foreground="#6c757d")
+        self.tree_red.pack(fill="both", expand=True, padx=5, pady=5)
+
+        if self.es_master:
+            self.lbl_mi_rol.config(text=f"Tu Rol: MASTER ({self.tapiz_asignado})", foreground="#28a745")
+            
+            f_controles = ttk.Frame(self.panel_red)
+            f_controles.pack(fill="x", padx=5, pady=10)
+            
+            tapices_restantes = [f"Tapiz {chr(65+i)}" for i in range(1, getattr(self, 'num_tapices_torneo', 1))]
+            if not tapices_restantes: tapices_restantes = ["---"]
+
+            ttk.Label(f_controles, text="Asignar Tapiz a Solicitante:").pack(anchor="w")
+            self.cmb_asignar_tapiz = ttk.Combobox(f_controles, values=tapices_restantes, state="readonly")
+            self.cmb_asignar_tapiz.current(0)
+            self.cmb_asignar_tapiz.pack(fill="x", pady=(2, 10))
+
+            tk.Button(f_controles, text="✅ Aprobar Acceso", bg="#007bff", fg="white", font=("Helvetica", 9, "bold"), command=self.aprobar_conexion_red).pack(fill="x", pady=2)
+            tk.Button(f_controles, text="❌ Rechazar", bg="#dc3545", fg="white", command=self.rechazar_conexion_red).pack(fill="x", pady=2)
+            
+        else:
+            self.lbl_mi_rol.config(text=f"Tu Rol: CLIENTE", foreground="#17a2b8")
+            self.lbl_estado_cliente = ttk.Label(self.panel_red, text="⏳ Solicitud enviada al Master...", font=("Helvetica", 9, "bold"), foreground="#f39c12")
+            self.lbl_estado_cliente.pack(pady=10)
+            
+        # Un solo bucle unificado
+        self.actualizar_bucle_red()
+
+    def actualizar_bucle_red(self):
+        if not getattr(self, "escuchando_red", False): return
+        
+        # 1. Descargar combates bloqueados de forma segura
+        if hasattr(self.db, 'obtener_combates_en_curso'):
+            self.combates_en_curso_red = self.db.obtener_combates_en_curso(self.id_torneo)
+        else:
+            self.combates_en_curso_red = {}
+
+        # 2. Refrescar la cartelera de forma BLINDADA
+        if self.notebook.tabs() and self.notebook.select():
+            if self.notebook.index(self.notebook.select()) == 0:
+                self.actualizar_cartelera()
+                
+        # ---> CORRECCIÓN: Actualizar la lista de red SIEMPRE (Forzado, eliminamos winfo_ismapped)
+        if hasattr(self, 'refrescar_tabla_red'):
+            self.refrescar_tabla_red()
+        
+        # Repetir bucle
+        self.after(3000, self.actualizar_bucle_red)
+
+    def refrescar_tabla_red(self):
+        if not getattr(self, 'id_torneo', None): return
+        conexiones = self.db.obtener_conexiones_torneo(self.id_torneo)
+        for item in self.tree_red.get_children(): self.tree_red.delete(item)
+        
+        for c in conexiones:
+            es_master = c.get('es_master', False)
+            mi_id = getattr(self.controller, 'id_conexion_red', None)
+            tag = "yo_mismo" if str(c['id_conexion']) == str(mi_id) else "confirmado"
+            
+            nombre_visual = f"⭐ {c['nombre']} {c['apellidos']}" if es_master else f"{c['nombre']} {c['apellidos']}"
+            tapiz_visual = "MÁSTER" if es_master else c['tapiz_asignado']
+            
+            self.tree_red.insert("", "end", values=(c['id_conexion'], nombre_visual, c['nombre_dispositivo'], tapiz_visual, c['estado_conexion']), tags=(tag,))
+
+    def aprobar_conexion_red(self):
+        sel = self.tree_red.selection()
+        if not sel: return
+        id_conn = getattr(self.tree_red, f"id_{sel[0]}")
+        tapiz = self.cmb_asignar_tapiz.get()
+        if "---" in tapiz: return messagebox.showwarning("Aviso", "No hay tapices adicionales configurados en este torneo.")
+        
+        self.db.asignar_tapiz_a_cliente(id_conn, tapiz)
+
+    def rechazar_conexion_red(self):
+        sel = self.tree_red.selection()
+        if not sel: return
+        id_conn = getattr(self.tree_red, f"id_{sel[0]}")
+        self.db.rechazar_conexion_cliente(id_conn)
 
     def pre_cargar_memoria(self):
         """Genera el grid de todas las llaves sin necesidad de visualizarlas."""
@@ -494,6 +692,9 @@ class PantallaPareo(ttk.Frame):
                         else:
                             next_r.append(left if left not in (None, "SKIP") else right if right not in (None, "SKIP") else None)
                     grid.append(next_r)
+
+                # ---> CORRECCIÓN VITAL AQUÍ: Guardar la matriz calculada en la memoria global <---
+                self.grids_generados[llave_key] = grid
 
     def verificar_estado_torneo(self):
         """Mantiene el botón en Rojo hasta que el usuario cierre el torneo manualmente."""
@@ -582,6 +783,7 @@ class PantallaPareo(ttk.Frame):
             tk.Label(celda, text=texto, bg=bg_color, fg="white", font=("Helvetica", 10, "bold")).pack(expand=True)
 
         crear_celda_header("Ronda", 80, "#2a2a2a")
+        crear_celda_header("Tapiz", 80, "#2a2a2a") # <-- NUEVO: Encabezado Tapiz
         crear_celda_header("Estilo", 120, "#2a2a2a")
         crear_celda_header("División", 100, "#2a2a2a")
         crear_celda_header("Esquina Roja", 350, "#cc0000") 
@@ -591,11 +793,12 @@ class PantallaPareo(ttk.Frame):
         filler.pack(side="left", fill="both", expand=True)
 
         # TABLA DE DATOS
-        columnas = ("ronda", "estilo", "peso", "rojo", "azul")
+        columnas = ("ronda", "tapiz", "estilo", "peso", "rojo", "azul") # <-- NUEVO: Columna tapiz
         self.tree_cartelera = ttk.Treeview(contenedor_tabla, columns=columnas, show="", height=20)
         self.tree_cartelera.column("#0", width=0, stretch=tk.NO) 
         
         self.tree_cartelera.column("ronda", width=80, anchor="center", stretch=False)
+        self.tree_cartelera.column("tapiz", width=80, anchor="center", stretch=False) # <-- NUEVO: Ancho columna
         self.tree_cartelera.column("estilo", width=120, anchor="center", stretch=False)
         self.tree_cartelera.column("peso", width=100, anchor="center", stretch=False)
         self.tree_cartelera.column("rojo", width=350, stretch=False)
@@ -736,7 +939,7 @@ class PantallaPareo(ttk.Frame):
             ttk.Label(btn_frame, text="Avance Automático (Sin Acta de Combate)", foreground="#17a2b8", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
         else:
             ttk.Label(btn_frame, text="Registro Histórico (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
-            ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: self.abrir_previsualizacion_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+            ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: VentanaPrevisualizacionPDF(self, match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
 
         # --- CÁLCULO DE POSICIÓN MÁGICA (Debajo de la fila) ---
         self.panel_flotante.update_idletasks()
@@ -774,7 +977,9 @@ class PantallaPareo(ttk.Frame):
         for llave_key in self.divisiones_bloqueadas:
             grid = self.grids_generados.get(llave_key, [])
             estilo, peso_str = llave_key.split("-")
-            peso_int = int(peso_str.replace(" kg", "").strip())
+            
+            # --- CORRECCIÓN CRÍTICA: Parseo de peso a prueba de fallos ---
+            peso_int = int(peso_str.lower().replace("kg", "").replace(" ", "").strip())
             prio_estilo = 0 if "Femenina" in estilo else 1
 
             for r in range(len(grid)):
@@ -882,9 +1087,12 @@ class PantallaPareo(ttk.Frame):
                 registro_descanso[elegido["id_azul"]] = indice_actual
 
         # 3. Insertar la cartelera ya optimizada en la tabla visual
+        # --- NUEVO: Extraemos el tapiz actual de la red ---
+        tapiz_asignado = getattr(self.controller, 'tapiz_asignado', 'Tapiz A') 
+        
         for idx, c in enumerate(cartelera_final):
             self.tree_cartelera.insert("", "end", iid=str(idx), values=(
-                f"Ronda {c['ronda']}", c['estilo'], c['peso_str'], c['nom_rojo'], c['nom_azul']
+                f"Ronda {c['ronda']}", tapiz_asignado, c['estilo'], c['peso_str'], c['nom_rojo'], c['nom_azul'] # <-- Añadimos el tapiz a los valores
             ), tags=(c['llave_key'], str(c['nodo_combate'])))
             
             self.tree_cartelera.item(str(idx), text=c['llave_key'])
@@ -901,6 +1109,11 @@ class PantallaPareo(ttk.Frame):
         item_id = self.tree_cartelera.focus()
         if not item_id: return
         
+        # ---> NUEVO: Bloquear si ya está en amarillo <---
+        tags = self.tree_cartelera.item(item_id, "tags")
+        if "en_curso" in tags:
+            return messagebox.showwarning("Bloqueado", "Este combate ya está siendo arbitrado en otro tapiz.")
+
         llave_key = self.tree_cartelera.item(item_id, "text")
         match_node = getattr(self.tree_cartelera, f"nodo_{item_id}", None)
         
@@ -932,8 +1145,8 @@ class PantallaPareo(ttk.Frame):
 
         ttk.Label(top_frame, text="División de Peso:").pack(side="left", padx=5)
         
-        # --- SOLUCIÓN: ORDENAR LOS PESOS MATEMÁTICAMENTE (Menor a Mayor) ---
-        lista_pesos = sorted(list(pesos_dict.keys()), key=lambda x: float(x.replace(" kg", "").strip()))
+        # --- CORRECCIÓN CRÍTICA: Convertir "60kg" y "60 kg" en un float perfecto ---
+        lista_pesos = sorted(list(pesos_dict.keys()), key=lambda x: float(x.lower().replace("kg", "").replace(" ", "").strip()))
         
         cmb_peso = ComboBuscador(top_frame, values=lista_pesos, state="readonly", width=15)
         cmb_peso.pack(side="left", padx=5)
@@ -1232,24 +1445,26 @@ class PantallaPareo(ttk.Frame):
                     p_azul = self.obtener_peleador_real(node["peleador_azul"])
                     ganador = self.obtener_peleador_real(node["ganador"])
                     
-                    canvas.create_rectangle(x, box_y1, x + box_w, box_y2, outline="gray", fill="#1e1e1e")
+                    # --- BLOQUEO MULTI-TAPIZ ---
+                    tapiz_activo = getattr(self, 'combates_en_curso_red', {}).get(llave_key, {}).get(node.get("match_id"))
+                    color_borde = "#ffc107" if (tapiz_activo and not ganador) else "gray"
+                    
+                    canvas.create_rectangle(x, box_y1, x + box_w, box_y2, outline=color_borde, fill="#1e1e1e", width=2 if tapiz_activo else 1)
+                    
+                    if tapiz_activo and not ganador:
+                        canvas.create_text(x + box_w/2, box_y2 - 8, text=f"En curso: {tapiz_activo}", fill="#ffc107", font=("Helvetica", 7, "bold"))
                     
                     if self.modo_edicion:
-                        # Si NO está bloqueado, mostramos tooltips sencillos para todo
                         nom_rojo = p_rojo['nombre'] if p_rojo else f"Ganador Ronda {node['ronda']-1}"
                         nom_azul = p_azul['nombre'] if p_azul else f"Ganador Ronda {node['ronda']-1}"
                         texto_combate = f"Combate de Ronda {node['ronda']}\nRojo: {nom_rojo}\nAzul: {nom_azul}\nEstado: Pendiente"
                         canvas.zonas_tooltip.append((x, box_y1, x + box_w, box_y2, texto_combate))
                     else:
-                        # Si SÍ está bloqueado
                         if ganador:
                             color_texto = "#ff4d4d" if ganador['id'] == -1 else "white"
-                            
                             if ganador['id'] == -1:
-                                # Si es Doble DSQ, va centrado en una sola línea
                                 canvas.create_text(x + 10, y, text="Doble Descalificación", fill=color_texto, anchor="w", font=("Helvetica", 9, "bold"))
                             else:
-                                # Nombre en Negrita (arriba) y Club en Normal gris (abajo)
                                 canvas.create_text(x + 10, y - 7, text=ganador['nombre'], fill=color_texto, anchor="w", font=("Helvetica", 9, "bold"))
                                 canvas.create_text(x + 10, y + 8, text=ganador.get('club', 'Sin Club'), fill="#aaaaaa", anchor="w", font=("Helvetica", 7))
                             
@@ -1257,10 +1472,10 @@ class PantallaPareo(ttk.Frame):
                             texto_tooltip = f"Atleta: {ganador['nombre']}\nClub: {ganador.get('club', '')}\nCiudad: {ciudad}\nID: {ganador['id']}"
                             canvas.zonas_tooltip.append((x, box_y1, x + box_w, box_y2, texto_tooltip))
                         
-                        # 2. Hace clicable SOLO si le precede al menos 1 atleta
-                        if p_rojo is not None or p_azul is not None:
-                            canvas.combates_clickable.append((x, box_y1, x + box_w, box_y2, node))
-
+                        # Si NO está bloqueado por la red, permitir que sea clicable
+                        if not tapiz_activo or ganador:
+                            if p_rojo is not None or p_azul is not None:
+                                canvas.combates_clickable.append((x, box_y1, x + box_w, box_y2, node))
                 else:
                     # === LÓGICA DE ATLETAS (Ronda 1) ===
                     idx = llave_array.index(node) 
@@ -1466,7 +1681,7 @@ class PantallaPareo(ttk.Frame):
                     ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.editar_pelea(match_node, tab, llave_key)).pack(side="left", padx=5)
                 
                 # --- BOTÓN DE VER DATOS: Siempre disponible si hubo combate físico ---
-                ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: self.abrir_previsualizacion_pdf(match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+                ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: VentanaPrevisualizacionPDF(self, match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
                 
         elif p_rojo is not None and p_azul is not None:
             if is_rojo_fantasma or is_azul_fantasma:
@@ -1499,362 +1714,340 @@ class PantallaPareo(ttk.Frame):
                 nueva_fraccion = (coord_fondo_panel - altura_visible - min_y) / altura_total
                 tab.canvas.yview_moveto(nueva_fraccion)
 
-    def abrir_previsualizacion_pdf(self, match_node, estilo, peso):
-        p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
-        p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
-        ganador_data = match_node.get("ganador", {})
-        id_combate = ganador_data.get("id_combate")
-
-        if not id_combate:
-            return messagebox.showerror("Error", "No se encontró el ID del combate en BD.")
-
-        # Recopilar información faltante para el acta
-        torneo_nombre = "Torneo"
-        torneo_fecha = "--/--/----"
-        hora_fin_combate = "--:--"
-        conexion = self.db.conectar()
-        if conexion:
-            try:
-                with conexion.cursor() as cur:
-                    cur.execute("""
-                        SELECT t.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY'), to_char(c.hora_fin, 'HH24:MI')
-                        FROM combate c
-                        JOIN torneo_division td ON c.id_torneo_division = td.id
-                        JOIN torneo t ON td.id_torneo = t.id
-                        WHERE c.id = %s
-                    """, (id_combate,))
-                    res = cur.fetchone()
-                    if res: torneo_nombre, torneo_fecha, hora_fin_combate = res
-            except Exception as e: pass
-            finally: conexion.close()
-
-        oficiales_db = self.db.obtener_oficiales()
-        dict_oficiales = {o['id']: f"{o['apellidos']}, {o['nombre']}" for o in oficiales_db}
-        nom_arbitro = dict_oficiales.get(ganador_data.get("id_arbitro"), "N/A")
-        nom_juez = dict_oficiales.get(ganador_data.get("id_juez"), "N/A")
-        nom_jefe = dict_oficiales.get(ganador_data.get("id_jefe_tapiz"), "N/A")
-
-        puntos_historicos = self.db.obtener_puntuacion_combate(id_combate)
-
-        # Construir Ventana de Previsualización
-        prev_win = tk.Toplevel(self)
-        prev_win.title("Previsualización de Acta Oficial")
-        prev_win.geometry("650x650")
-        prev_win.transient(self)
-        prev_win.grab_set()
-
-        titulo_font = ("Helvetica", 14, "bold")
-        sub_font = ("Helvetica", 10, "bold")
-        norm_font = ("Helvetica", 10)
-
-        # Encabezado
-        ttk.Label(prev_win, text=torneo_nombre.upper(), font=titulo_font).pack(pady=(15, 5))
-        ttk.Label(prev_win, text=f"{torneo_fecha}  |  {estilo} - {peso}  |  Ronda {match_node['ronda']}", font=norm_font).pack()
-
-        # Oficiales
-        frame_of = ttk.LabelFrame(prev_win, text="Cuerpo Arbitral", padding=10)
-        frame_of.pack(fill="x", padx=20, pady=10)
-        ttk.Label(frame_of, text=f"Árbitro: {nom_arbitro}", font=norm_font).grid(row=0, column=0, sticky="w", padx=5)
-        ttk.Label(frame_of, text=f"Juez: {nom_juez}", font=norm_font).grid(row=0, column=1, sticky="w", padx=20)
-        ttk.Label(frame_of, text=f"Jefe de Tapiz: {nom_jefe}", font=norm_font).grid(row=0, column=2, sticky="w", padx=5)
-
-        # Atletas
-        frame_atl = ttk.Frame(prev_win)
-        frame_atl.pack(fill="x", padx=20, pady=5)
-        frame_atl.columnconfigure(0, weight=1); frame_atl.columnconfigure(1, weight=1)
-
-        lbl_rojo = tk.Label(frame_atl, text=f"{p_rojo['nombre']}\n{p_rojo['club']}", bg="#cc0000", fg="white", font=sub_font, height=3)
-        lbl_rojo.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        lbl_azul = tk.Label(frame_atl, text=f"{p_azul['nombre']}\n{p_azul['club']}", bg="#0000cc", fg="white", font=sub_font, height=3)
-        lbl_azul.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-
-        # Tabla de Puntos
-        frame_pts = ttk.LabelFrame(prev_win, text="Historial de Puntos Técnicos", padding=10)
-        frame_pts.pack(fill="both", expand=True, padx=20, pady=5)
-
-        tv_pts = ttk.Treeview(frame_pts, columns=("periodo", "esquina", "puntos", "tipo"), show="headings", height=6)
-        for col in tv_pts['columns']: tv_pts.heading(col, text=col.capitalize())
-        tv_pts.column("periodo", width=80, anchor="center"); tv_pts.column("esquina", width=100, anchor="center")
-        tv_pts.column("puntos", width=80, anchor="center"); tv_pts.column("tipo", width=150, anchor="center")
-        tv_pts.pack(fill="both", expand=True)
-
-        p1_r, p2_r, p1_a, p2_a = 0, 0, 0, 0
-        for pt in puntos_historicos:
-            val = pt['valor_puntos']
-            if pt['color_esquina'] == 'Rojo':
-                if pt['periodo'] == 1: p1_r += val
-                else: p2_r += val
-            else:
-                if pt['periodo'] == 1: p1_a += val
-                else: p2_a += val
-            tv_pts.insert("", "end", values=(pt['periodo'], pt['color_esquina'], val, pt['tipo_accion']))
-
-        # Resultado
-        frame_res = ttk.LabelFrame(prev_win, text="Resultado", padding=10)
-        frame_res.pack(fill="x", padx=20, pady=10)
-        
-        ttk.Label(frame_res, text=f"Marcador: Rojo {p1_r+p2_r} - {p1_a+p2_a} Azul", font=sub_font).pack(pady=2)
-        ttk.Label(frame_res, text=f"Ganador: {ganador_data.get('nombre', '')}", font=sub_font, foreground="#28a745").pack(pady=2)
-        ttk.Label(frame_res, text=f"Método: {ganador_data.get('motivo_victoria', '')}", font=norm_font).pack(pady=2)
-
-        # Botones de Acción Finales
-        btn_frame_inf = ttk.Frame(prev_win)
-        btn_frame_inf.pack(side="bottom", pady=15)
-
-        ttk.Button(btn_frame_inf, text="📄 Exportar PDF", command=lambda: [prev_win.destroy(), self.exportar_pdf(match_node, estilo, peso)]).pack(side="left", padx=10)
-        ttk.Button(btn_frame_inf, text="🖨️ Imprimir Acta", command=lambda: self.imprimir_combate(match_node, estilo, peso)).pack(side="left", padx=10)
+    
 
     def imprimir_combate(self, match_node, estilo, peso):
-        """Genera el PDF en una carpeta temporal y lo envía a imprimir."""
+        """Genera el PDF y lo abre para que el usuario pueda imprimirlo nativamente (Evita Error 1155)."""
         import tempfile
         import time
         
-        # Crear un archivo temporal
         temp_dir = tempfile.gettempdir()
-        temp_file = os.path.join(temp_dir, f"impresion_combate_{match_node['match_id']}_{int(time.time())}.pdf")
+        temp_file = os.path.join(temp_dir, f"acta_combate_{match_node['match_id']}_{int(time.time())}.pdf")
         
-        # Llamar a exportar_pdf silenciosamente pasándole la ruta directa
+        # Generar silenciosamente
         self.exportar_pdf(match_node, estilo, peso, ruta_directa=temp_file)
         
-        # Enviar el comando al sistema operativo (Windows)
+        # Abrir archivo con el lector de PDF por defecto
         if os.path.exists(temp_file):
             try:
-                os.startfile(temp_file, "print")
-                messagebox.showinfo("Imprimiendo", "El documento ha sido enviado a la cola de impresión.")
+                os.startfile(temp_file)
             except Exception as e:
-                messagebox.showerror("Error de Impresión", f"No se pudo enviar a imprimir automáticamente.\n\nEl archivo se guardó en:\n{temp_file}\n\nDetalle del sistema: {e}")
+                messagebox.showerror("Error", f"No se pudo abrir el archivo PDF.\n\nDetalle: {e}")
 
     # ================= EXPORTACIÓN A PDF DESDE PAREO =================
-    def exportar_pdf(self, match_node, estilo, peso, ruta_directa=None): # <-- NUEVOS PARÁMETROS
+    def exportar_pdf(self, match_node, estilo, peso, ruta_directa=None, preview_mode=False, config_override=None, zoom_factor=1.5):
         if not PDF_DISPONIBLE: 
-            if not ruta_directa: messagebox.showerror("Error", "PyMuPDF no está instalada.")
-            return
+            if not preview_mode and not ruta_directa: messagebox.showerror("Error", "PyMuPDF no está instalada.")
+            return None
             
         ruta_plantilla = "hoja_anotacion.pdf" 
         if not os.path.exists(ruta_plantilla): 
-            if not ruta_directa: messagebox.showerror("Error", f"No se encontró '{ruta_plantilla}'.")
-            return
+            if not preview_mode and not ruta_directa: messagebox.showerror("Error", f"No se encontró '{ruta_plantilla}'.")
+            return None
+
+        cfg = config_override if config_override else self.cargar_config_pdf()
 
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         ganador_data = match_node.get("ganador", {})
         id_combate = ganador_data.get("id_combate")
 
-        if not id_combate:
-            if not ruta_directa: messagebox.showerror("Error", "No se encontró el ID del combate en BD.")
-            return
+        apellido_rojo = p_rojo['nombre'].split(',')[0].replace(' ', '_') if p_rojo else "Rojo"
+        apellido_azul = p_azul['nombre'].split(',')[0].replace(' ', '_') if p_azul else "Azul"
 
-        apellido_rojo = p_rojo['nombre'].split(',')[0].replace(' ', '_')
-        apellido_azul = p_azul['nombre'].split(',')[0].replace(' ', '_')
-        
-        # --- SILENCIAR EL DIÁLOGO SI ES EXPORTACIÓN MASIVA ---
-        if not ruta_directa:
+        if not preview_mode and not ruta_directa:
             ruta_guardado = filedialog.asksaveasfilename(
                 defaultextension=".pdf", filetypes=[("PDF", "*.pdf")],
                 initialfile=f"Hoja_Puntuacion_R{match_node['ronda']}_{apellido_rojo}_vs_{apellido_azul}.pdf"
             )
-            if not ruta_guardado: return
+            if not ruta_guardado: return None
         else:
             ruta_guardado = ruta_directa
 
-        # 1. Recuperar los datos del Torneo y hora de fin
-        torneo_nombre = ""
-        torneo_fecha = ""
-        hora_fin_combate = "" # <-- Nueva variable
+        # 1. Recuperar datos de BD
+        torneo_nombre = "Torneo"
+        torneo_fecha = "--/--/----"
+        hora_fin_combate = "" 
+        
+        id_arbitro = str(ganador_data.get("id_arbitro", ""))
+        id_juez = str(ganador_data.get("id_juez", ""))
+        id_jefe = str(ganador_data.get("id_jefe_tapiz", ""))
+        id_rojo_str = str(p_rojo['id']) if p_rojo and p_rojo['id'] != -1 else ""
+        id_azul_str = str(p_azul['id']) if p_azul and p_azul['id'] != -1 else ""
+
         conexion = self.db.conectar()
         if conexion:
             try:
                 with conexion.cursor() as cur:
-                    # Añadimos c.hora_fin a la consulta
-                    cur.execute("""
-                        SELECT t.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY'), to_char(c.hora_fin, 'HH24:MI')
-                        FROM combate c
-                        JOIN torneo_division td ON c.id_torneo_division = td.id
-                        JOIN torneo t ON td.id_torneo = t.id
-                        WHERE c.id = %s
-                    """, (id_combate,))
-                    res = cur.fetchone()
-                    if res:
-                        torneo_nombre, torneo_fecha = res[0], res[1]
-                        hora_fin_combate = res[2] # <-- Capturamos la hora
-            except Exception as e: 
-                print("Error consultando datos del torneo:", e)
-            finally: 
-                conexion.close()
+                    if id_combate:
+                        cur.execute("""
+                            SELECT t.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY'), to_char(c.hora_fin, 'HH24:MI')
+                            FROM combate c JOIN torneo_division td ON c.id_torneo_division = td.id JOIN torneo t ON td.id_torneo = t.id
+                            WHERE c.id = %s
+                        """, (id_combate,))
+                        res = cur.fetchone()
+                        if res: torneo_nombre, torneo_fecha, hora_fin_combate = res
+            except Exception: pass
+            finally: conexion.close()
 
-        # 2. Extraer Nombres de Oficiales cruzando el ID con la BD
         oficiales_db = self.db.obtener_oficiales()
         dict_oficiales = {o['id']: f"{o['apellidos']}, {o['nombre']}" for o in oficiales_db}
         nom_arbitro = dict_oficiales.get(ganador_data.get("id_arbitro"), "")
         nom_juez = dict_oficiales.get(ganador_data.get("id_juez"), "")
         nom_jefe = dict_oficiales.get(ganador_data.get("id_jefe_tapiz"), "")
 
-        # 3. Extraer y Calcular Puntos desde la BD
-        puntos_historicos = self.db.obtener_puntuacion_combate(id_combate)
-        p1_r, p2_r, p1_a, p2_a = 0, 0, 0, 0
-        for pt in puntos_historicos:
-            val = pt['valor_puntos']
-            if pt['color_esquina'] == 'Rojo':
-                if pt['periodo'] == 1: p1_r += val
-                else: p2_r += val
-            else:
-                if pt['periodo'] == 1: p1_a += val
-                else: p2_a += val
-        
-        total_r = p1_r + p2_r
-        total_a = p1_a + p2_a
-        
+        puntos_historicos = self.db.obtener_puntuacion_combate(id_combate) if id_combate else []
+
         nombre_ganador = ganador_data.get("nombre", "")
         motivo_victoria = ganador_data.get("motivo_victoria", "")
         codigo_victoria = motivo_victoria.split(" - ")[0] if motivo_victoria else ""
 
-        # 4. Generación del PDF
+        # ================= INYECCIÓN DE DATOS AL PDF =================
         try:
-            from datetime import datetime
-            #hora_actual = datetime.now().strftime("%H:%M") 
-
             doc = fitz.open(ruta_plantilla)
             page = doc[0]
 
-            def escribir(texto, x, y, size=10, color=(0, 0, 0)):
-                if texto is not None and str(texto).strip() != "":
-                    page.insert_text(fitz.Point(x, y), str(texto), fontsize=size, color=color)
+            def hex_a_rgb(hex_color):
+                hex_color = hex_color.lstrip('#')
+                return tuple(int(hex_color[i:i+2], 16)/255.0 for i in (0, 2, 4))
 
-            # ================= CALIBRACIÓN MILIMÉTRICA EXACTA =================
-            
-            # 1. ENCABEZADO SUPERIOR
-            escribir(torneo_nombre, 78, 132, size=10) 
-            
-            escribir(nom_arbitro, 360, 115, size=8) 
-            escribir(nom_juez, 360, 138, size=8)    
-            escribir(nom_jefe, 360, 160, size=8)  
+            # --- NUEVA FUNCIÓN MAESTRA BASADA EN MATEMÁTICAS INFALIBLES ---
+            def escribir_caja(texto, config_dict, is_multiline=False):
+                if texto is None or str(texto).strip() == "" or "coords" not in config_dict: return
+                texto_str = str(texto).strip()
+                
+                rect = fitz.Rect(config_dict["coords"])
+                al = config_dict.get("align", "Izquierda")
+                valign = config_dict.get("valign", "Medio")
+                font_base = config_dict.get("font", "Helvetica")
+                b = config_dict.get("bold", False)
+                i = config_dict.get("italic", False)
+                
+                if font_base == "Helvetica": fname = "heboit" if b and i else "hebo" if b else "heit" if i else "helv"
+                elif font_base == "Times": fname = "tiboit" if b and i else "tibo" if b else "tiit" if i else "tiro"
+                else: fname = "coboit" if b and i else "cobo" if b else "coit" if i else "cour"
+                
+                color = hex_a_rgb(config_dict.get("color", "#000000"))
+                size = config_dict.get("size", 10)
 
-            # 2. FILA DE INFORMACIÓN DEL COMBATE
-            y_info = 203
-            escribir(torneo_fecha, 90, y_info, size=9)          
-            escribir(f"{match_node['match_id']}", 170, y_info, size=9) 
-            escribir(peso, 240, y_info, size=9)
-            escribir(estilo, 295, y_info, size=9)                
-            escribir(f"{match_node['ronda']}", 375, y_info, size=9) 
-            escribir("Fase", 430, y_info, size=9)                           
-            escribir("Tapiz A", 495, y_info, size=9)                        
+                if is_multiline:
+                    al_map = {"Izquierda": fitz.TEXT_ALIGN_LEFT, "Centro": fitz.TEXT_ALIGN_CENTER, "Derecha": fitz.TEXT_ALIGN_RIGHT}
+                    page.insert_textbox(rect, texto_str, fontsize=size, fontname=fname, align=al_map.get(al, 0), color=color)
+                else:
+                    tw = len(texto_str) * (size * 0.55) 
+                    if al == "Centro": x = rect.x0 + (rect.width - tw) / 2
+                    elif al == "Derecha": x = rect.x1 - tw - 2
+                    else: x = rect.x0 + 2
+                    
+                    ascender = size * 0.8
+                    if valign == "Arriba": y = rect.y0 + ascender
+                    elif valign == "Abajo": y = rect.y1 - (size * 0.2)
+                    else: y = rect.y0 + (rect.height / 2) + (ascender / 2) - 1 
+                    
+                    page.insert_text(fitz.Point(x, y), texto_str, fontsize=size, fontname=fname, color=color)
+                
+                if config_dict.get("underline", False):
+                    page.draw_line(fitz.Point(rect.x0, rect.y1), fitz.Point(rect.x1, rect.y1), color=color, width=1)
 
-            # 3. NOMBRES DE ATLETAS Y CLUBES 
-            y_nombres = 254
-            escribir(p_rojo['nombre'], 75, y_nombres, size=8, color=(0, 0, 0))
-            escribir(p_rojo['club'], 183, y_nombres, size=7)
+            # --- SIMULADOR VISUAL Y FORMATEO DE GANADOR ---
+            hubo_combate = match_node.get("ganador") is not None
             
-            escribir(p_azul['nombre'], 322, y_nombres, size=8, color=(0, 0, 0))
-            escribir(p_azul['club'], 429, y_nombres, size=7)
+            # Formatear el texto del ganador para que incluya el Club
+            texto_ganador = nombre_ganador
+            if hubo_combate and ganador_data:
+                club_ganador = ganador_data.get("club", "")
+                if club_ganador and club_ganador not in ["Sin Club", "---"]:
+                    texto_ganador = f"{nombre_ganador} ({club_ganador})"
+            
+            if preview_mode:
+                # CORRECCIÓN: Respetamos los datos reales si existen. Solo simulamos los vacíos.
+                if not p_rojo:
+                    p_rojo = {'nombre': "Atleta Rojo (Simulado)", 'club': "Club Rojo", 'id': 99}
+                if not p_azul:
+                    p_azul = {'nombre': "Atleta Azul (Simulado)", 'club': "Club Azul", 'id': 88}
+                
+                # Si el combate real aún no se ha jugado, forzamos un ganador para ver las palomitas en el editor
+                if not match_node.get("ganador"):
+                    hubo_combate = True
+                    nombre_ganador = p_rojo.get('nombre', 'Ganador')
+                    club_ganador = p_rojo.get('club', 'Club Rojo')
+                    texto_ganador = f"{nombre_ganador} ({club_ganador})"
+                    codigo_victoria = "VFA"
 
-            # 4. CUADRÍCULA DE PUNTOS TÉCNICOS POR PERIODO
-            x_p1_r, y_p1_r = 110, 292  
-            x_p2_r, y_p2_r = 110, 320  
+            # Inyección de Textos Básicos
+            escribir_caja(torneo_nombre.upper(), cfg.get("torneo_box", {}), is_multiline=True)
+            escribir_caja(nom_arbitro, cfg.get("arbitro_nom", {})) 
+            escribir_caja(id_arbitro, cfg.get("arbitro_id", {})) 
+            escribir_caja(nom_juez, cfg.get("juez_nom", {}))    
+            escribir_caja(id_juez, cfg.get("juez_id", {})) 
+            escribir_caja(nom_jefe, cfg.get("jefe_nom", {}))  
+            escribir_caja(id_jefe, cfg.get("jefe_id", {}))
+
+            escribir_caja(torneo_fecha, cfg.get("fecha", {}))          
+            escribir_caja(f"{match_node.get('match_id', '')}", cfg.get("match_id", {})) 
+            escribir_caja(peso, cfg.get("peso", {}))
+            escribir_caja(estilo, cfg.get("estilo", {}))                
+            escribir_caja(f"{match_node.get('ronda', '')}", cfg.get("ronda", {})) 
+            escribir_caja("Fase", cfg.get("fase", {}))                           
             
-            x_p1_a, y_p1_a = 358, 292  
-            x_p2_a, y_p2_a = 358, 320  
-            
-            espaciado = 15 
-            ultimo_punto_ganador = None
+            # --- CORRECCIÓN: TAPIZ DINÁMICO EN EL PDF ---
+            tapiz_actual = getattr(self.controller, 'tapiz_asignado', 'Tapiz A')
+            escribir_caja(tapiz_actual, cfg.get("tapiz", {}))                        
+
+            if p_rojo:
+                escribir_caja(p_rojo.get('nombre', ''), cfg.get("rojo_nom", {}))
+                escribir_caja(p_rojo.get('club', ''), cfg.get("rojo_club", {}))
+                escribir_caja(id_rojo_str, cfg.get("rojo_id", {}))
+            if p_azul:
+                escribir_caja(p_azul.get('nombre', ''), cfg.get("azul_nom", {}))
+                escribir_caja(p_azul.get('club', ''), cfg.get("azul_club", {}))
+                escribir_caja(id_azul_str, cfg.get("azul_id", {}))
+
+            # --- LÓGICA MATRICIAL PARA PUNTOS TÉCNICOS ---
+            cfg_r1 = cfg.get("pts_r_p1", {}); cfg_r2 = cfg.get("pts_r_p2", {})
+            cfg_a1 = cfg.get("pts_a_p1", {}); cfg_a2 = cfg.get("pts_a_p2", {})
+
+            idx_r1 = idx_r2 = idx_a1 = idx_a2 = 0
+            ultimo_punto_ganador = None 
+
+            def dibujar_punto(texto, cfg_base, index):
+                if not cfg_base or "coords" not in cfg_base: return None
+                cfg_temp = cfg_base.copy()
+                x0, y0, x1, y1 = cfg_temp["coords"]
+                # CORRECCIÓN: Usar float para permitir saltos con decimales
+                sx = float(cfg_temp.get("step_x", 0.0))
+                sy = float(cfg_temp.get("step_y", 0.0))
+                cfg_temp["coords"] = [x0 + sx*index, y0 + sy*index, x1 + sx*index, y1 + sy*index]
+                escribir_caja(texto, cfg_temp)
+                return ((x0 + x1)/2 + sx*index, (y0 + y1)/2 + sy*index)
+
+            sum_p1_r = sum_p2_r = sum_p1_a = sum_p2_a = 0
+            has_p1_r = has_p2_r = has_p1_a = has_p2_a = False
 
             for pt in puntos_historicos:
                 texto_pt = "P" if pt['tipo_accion'] == 'Penalización' else str(pt['valor_puntos'])
-                
+                val = pt['valor_puntos']
                 if pt['color_esquina'] == 'Rojo':
                     if pt['periodo'] == 1:
-                        escribir(texto_pt, x_p1_r, y_p1_r, color=(0.8, 0, 0), size=10)
-                        if p_rojo['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p1_r, y_p1_r)
-                        x_p1_r += espaciado
+                        coord_center = dibujar_punto(texto_pt, cfg_r1, idx_r1); idx_r1 += 1
+                        sum_p1_r += val; has_p1_r = True
                     else:
-                        escribir(texto_pt, x_p2_r, y_p2_r, color=(0.8, 0, 0), size=10)
-                        if p_rojo['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p2_r, y_p2_r)
-                        x_p2_r += espaciado
+                        coord_center = dibujar_punto(texto_pt, cfg_r2, idx_r2); idx_r2 += 1
+                        sum_p2_r += val; has_p2_r = True
                 else: 
                     if pt['periodo'] == 1:
-                        escribir(texto_pt, x_p1_a, y_p1_a, color=(0, 0, 0.8), size=10)
-                        if p_azul['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p1_a, y_p1_a)
-                        x_p1_a += espaciado
+                        coord_center = dibujar_punto(texto_pt, cfg_a1, idx_a1); idx_a1 += 1
+                        sum_p1_a += val; has_p1_a = True
                     else:
-                        escribir(texto_pt, x_p2_a, y_p2_a, color=(0, 0, 0.8), size=10)
-                        if p_azul['nombre'] == nombre_ganador: ultimo_punto_ganador = (x_p2_a, y_p2_a)
-                        x_p2_a += espaciado
+                        coord_center = dibujar_punto(texto_pt, cfg_a2, idx_a2); idx_a2 += 1
+                        sum_p2_a += val; has_p2_a = True
 
-            # 5. TOTALES DESGLOSADOS POR PERIODO 
-            escribir(p1_r, 269, y_p1_r, size=11, color=(0.8, 0, 0))
-            escribir(p2_r, 269, y_p2_r, size=11, color=(0.8, 0, 0))
+                if coord_center and ((pt['color_esquina'] == 'Rojo' and p_rojo and p_rojo['nombre'] == nombre_ganador) or
+                                     (pt['color_esquina'] == 'Azul' and p_azul and p_azul['nombre'] == nombre_ganador)):
+                    ultimo_punto_ganador = coord_center
+
+            # --- SUB-TOTALES Y TOTALES CON CERO FORZADO ---
+            # P1 siempre muestra 0 si hubo combate 
+            val_p1_r = str(sum_p1_r) if (has_p1_r or has_p1_a or hubo_combate) else ""
+            val_p1_a = str(sum_p1_a) if (has_p1_r or has_p1_a or hubo_combate) else ""
             
-            escribir(p1_a, 518, y_p1_a, size=11, color=(0, 0, 0.8))
-            escribir(p2_a, 518, y_p2_a, size=11, color=(0, 0, 0.8))
+            # NUEVO: P2 siempre muestra 0 si hubo combate (Igualando la lógica del P1)
+            val_p2_r = str(sum_p2_r) if (has_p2_r or has_p2_a or hubo_combate) else ""
+            val_p2_a = str(sum_p2_a) if (has_p2_r or has_p2_a or hubo_combate) else ""
 
-            # 6. TOTALES GENERALES DEL COMBATE 
-            escribir(total_r, 82, 357, size=16, color=(0.8, 0, 0))
-            escribir(total_a, 516, 357, size=16, color=(0, 0, 0.8))
+            escribir_caja(val_p1_r, cfg.get("subtot_r_p1", {}))
+            escribir_caja(val_p2_r, cfg.get("subtot_r_p2", {}))
+            escribir_caja(val_p1_a, cfg.get("subtot_a_p1", {}))
+            escribir_caja(val_p2_a, cfg.get("subtot_a_p2", {}))
 
-            # 7. PUNTOS DE CLASIFICACIÓN Y TACHAR PERDEDOR
+            total_r = sum_p1_r + sum_p2_r
+            total_a = sum_p1_a + sum_p2_a
+
+            escribir_caja(str(total_r) if hubo_combate else "", cfg.get("total_pts_r", {}))
+            escribir_caja(str(total_a) if hubo_combate else "", cfg.get("total_pts_a", {}))
+
             pts_gan = 0; pts_per = 0
-            
             if codigo_victoria in ["VFA", "VIN", "VCA", "DSQ", "VF", "VA", "VB"]: pts_gan = 5
             elif codigo_victoria == "VSU": pts_gan = 4
             elif codigo_victoria == "VSU1": pts_gan = 4; pts_per = 1
             elif codigo_victoria == "VPO": pts_gan = 3
             elif codigo_victoria == "VPO1": pts_gan = 3; pts_per = 1
 
-            if nombre_ganador == p_rojo['nombre']:
-                clas_rojo, clas_azul = pts_gan, pts_per
-            else:
-                clas_rojo, clas_azul = pts_per, pts_gan
+            if p_rojo and nombre_ganador == p_rojo.get('nombre'): clas_rojo, clas_azul = pts_gan, pts_per
+            else: clas_rojo, clas_azul = pts_per, pts_gan
 
-            escribir(clas_rojo, 252, 408, size=16, color=(0.8, 0, 0))
-            escribir(clas_azul, 346, 408, size=16, color=(0, 0, 0.8))
-
-            # 8. GANADOR Y HORA DE FINALIZACIÓN
-            # Si el combate terminó, usamos la hora de la BD. Si no (por algún error), ponemos --:--
-            hora_pdf = hora_fin_combate if hora_fin_combate else "--:--" 
-            
-            escribir(nombre_ganador, 80, 448, size=11)
-            escribir(hora_pdf, 448, 448, size=11)
-
-            # 9. CÍRCULO EN EL ÚLTIMO PUNTO (Solo para VFA)
-            if ultimo_punto_ganador:
-                page.draw_circle(fitz.Point(ultimo_punto_ganador[0] + 3, ultimo_punto_ganador[1] - 3), radius=6, color=(0.1, 0.6, 0.1), width=1.5)
-            
-            # 10. EL CHECKMARK (✔) EN LA TABLA DE REGLAMENTO
-            # --- Variables de calibración rápida ---
-            x_base = 85        # Ajusta para mover a la izquierda/derecha
-            y_base = 490       # Posición Y del primer elemento (VT / VFA)
-            alto_fila = 23     # Distancia en píxeles entre cada fila
-            
-            # Orden de las opciones de arriba hacia abajo en tu PDF
-            orden_victorias = ["VFA", "VAB", "VIN", "VFO", "DSQ", "VCA", "VSU", "VSU1", "VPO1", "VPO"]    
-            
-            if codigo_victoria in orden_victorias:
-                indice = orden_victorias.index(codigo_victoria)
-                y_check = y_base + (indice * alto_fila)
+            if hubo_combate:
+                escribir_caja(str(clas_rojo), cfg.get("clas_pts_r", {}))
+                escribir_caja(str(clas_azul), cfg.get("clas_pts_a", {}))
                 
-                # Dibujo del check (✔)
-                p1 = fitz.Point(x_base, y_check - 2)
-                p2 = fitz.Point(x_base + 5, y_check + 6)
-                p3 = fitz.Point(x_base + 15, y_check - 8)
-                page.draw_line(p1, p2, color=(0.1, 0.7, 0.1), width=2.5)
-                page.draw_line(p2, p3, color=(0.1, 0.7, 0.1), width=2.5)
+                # CORRECCIÓN: Se quitó is_multiline=True 
+                escribir_caja(texto_ganador, cfg.get("ganador_nom", {}))
+                
+                hora_pdf = hora_fin_combate if hora_fin_combate else "--:--" 
+                escribir_caja(hora_pdf, cfg.get("hora_fin", {}))
 
+            if ultimo_punto_ganador:
+                page.draw_circle(fitz.Point(ultimo_punto_ganador[0], ultimo_punto_ganador[1]), radius=6, color=(0.1, 0.6, 0.1), width=1.5)
+            
+            # --- DIBUJADO DE CHECKS (MATRIX INTELIGENTE) ---
+            # CORRECCIÓN: Se añadió "2DSQ" (E2 0:0 - Doble Descalificación) al final
+            orden_victorias = ["VFA", "VAB", "VIN", "VFO", "DSQ", "VCA", "VSU", "VSU1", "VPO1", "VPO", "2DSQ"]    
+            if codigo_victoria in orden_victorias:
+                cfg_vic = cfg.get("check_vic", {})
+                if "coords" in cfg_vic:
+                    index = orden_victorias.index(codigo_victoria)
+                    x0, y0, x1, y1 = cfg_vic["coords"]
+                    # CORRECCIÓN: Usar float para saltos milimétricos
+                    sx, sy = float(cfg_vic.get("step_x", 0.0)), float(cfg_vic.get("step_y", 0.0))
+                    
+                    bx0, by0, bx1, by1 = x0 + sx*index, y0 + sy*index, x1 + sx*index, y1 + sy*index
+                    color_check = hex_a_rgb(cfg_vic.get("color", "#00aa00"))
+                    p1 = fitz.Point(bx0 + (bx1-bx0)*0.2, by0 + (by1-by0)*0.5)
+                    p2 = fitz.Point(bx0 + (bx1-bx0)*0.4, by0 + (by1-by0)*0.8)
+                    p3 = fitz.Point(bx0 + (bx1-bx0)*0.8, by0 + (by1-by0)*0.2)
+                    page.draw_line(p1, p2, color=color_check, width=2.5)
+                    page.draw_line(p2, p3, color=color_check, width=2.5)
+
+            # --- SI ES MODO PREVISUALIZACIÓN, RENDERIZAR IMAGEN ESCALADA Y SALIR ---
+            if preview_mode:
+                return page.get_pixmap(matrix=fitz.Matrix(zoom_factor, zoom_factor))
+
+            # SI NO, GUARDAR NORMALMENTE
             doc.save(ruta_guardado)
             doc.close()
+            
             if not ruta_directa:
-                messagebox.showinfo("Éxito", f"Hoja técnica exportada correctamente.")
+                messagebox.showinfo("Éxito", "Hoja técnica exportada correctamente.")
+            return None
 
         except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un error al generar el PDF:\n{str(e)}")
+            if not preview_mode: messagebox.showerror("Error", f"Ocurrió un error al generar el PDF:\n{str(e)}")
+            return None
 
     def iniciar_pelea(self, match_node, tab, llave_key):
+        # Verificación extra por seguridad de red
+        tapiz_activo = getattr(self, 'combates_en_curso_red', {}).get(llave_key, {}).get(match_node["match_id"])
+        if tapiz_activo:
+            return messagebox.showwarning("Bloqueado", f"Este combate ya está activo en: {tapiz_activo}")
+
         from ventana_combate import VentanaCombate 
-        
-        self.cerrar_panel_combate() # <-- NUEVO
+        self.cerrar_panel_combate() 
             
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         
-        VentanaCombate(self, match_node, p_rojo, p_azul, lambda m_id, gan, mot, arb, jue, jef, hist, tot: self.asignar_ganador(match_node, gan, mot, tab, llave_key, arb, jue, jef, hist, tot))
+        # --- NUEVO: Bloquear combate en la BD ---
+        if hasattr(self.db, 'marcar_combate_en_curso'):
+            self.db.marcar_combate_en_curso(self.id_torneo, llave_key, match_node["match_id"], getattr(self.controller, 'tapiz_asignado', 'Tapiz X'))
+        
+        # Callback para soltar la BD si cierra la ventana con la X
+        def liberar_combate():
+            if hasattr(self.db, 'liberar_combate_en_curso'):
+                self.db.liberar_combate_en_curso(self.id_torneo, llave_key, match_node["match_id"])
+        
+        VentanaCombate(self, match_node, p_rojo, p_azul, 
+                       lambda m_id, gan, mot, arb, jue, jef, hist, tot: self.asignar_ganador(match_node, gan, mot, tab, llave_key, arb, jue, jef, hist, tot),
+                       callback_cancelar=liberar_combate)
 
     def editar_pelea(self, match_node, tab, llave_key): 
         from ventana_editar_pelea import VentanaEditarPelea
@@ -1867,6 +2060,11 @@ class PantallaPareo(ttk.Frame):
 
     def asignar_ganador(self, match_node, ganador, motivo, tab, llave_key, id_arb=None, id_jue=None, id_jef=None, historial=None, totales=None):
         match_id = match_node["match_id"] 
+
+        # --- NUEVO: Soltar el candado de la base de datos ---
+        if hasattr(self.db, 'liberar_combate_en_curso'):
+            self.db.liberar_combate_en_curso(self.id_torneo, llave_key, match_id)
+
         puntos_rojo = totales['rojo'] if totales else 0
         puntos_azul = totales['azul'] if totales else 0
 
@@ -1919,6 +2117,9 @@ class PantallaPareo(ttk.Frame):
             
                 if mostrar_msg:
                     messagebox.showinfo("Bloqueado", "Llave confirmada y asegurada.")
+                    # --- NUEVO: Refrescar la cartelera al confirmar llave individual ---
+                    self.actualizar_cartelera()
+                    
                 self.verificar_estado_torneo()
                 
                 # --- CORRECCIÓN: Evaluar visibilidad de exportaciones ---

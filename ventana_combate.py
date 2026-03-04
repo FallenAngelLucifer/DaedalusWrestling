@@ -4,12 +4,18 @@ from utilidades import aplicar_autocompletado
 from utilidades import ComboBuscador
 
 class VentanaCombate(tk.Toplevel):
-    def __init__(self, parent, match_node, p_rojo, p_azul, callback_ganador):
+    def __init__(self, parent, match_node, p_rojo, p_azul, callback_ganador, callback_cancelar=None, num_tapices=1):
         super().__init__(parent)
+        self.parent = parent
         self.match_node = match_node
         self.p_rojo = p_rojo
         self.p_azul = p_azul
         self.callback_ganador = callback_ganador
+        self.callback_cancelar = callback_cancelar # Intercepta el cierre
+        self.num_tapices = num_tapices
+        
+        # Bloquear el cierre natural de la ventana con la "X" roja
+        self.protocol("WM_DELETE_WINDOW", self.intentar_cerrar)
         
         # Variables de puntuación (Total)
         self.score_rojo = tk.IntVar(value=0)
@@ -46,8 +52,21 @@ class VentanaCombate(tk.Toplevel):
             "VPO - Victoria por Puntos (sin puntos del perdedor)"
         ]
 
-        self.oficiales_db = parent.db.obtener_oficiales()
+        # --- LÓGICA DE OPERADOR DE SOFTWARE ---
+        # Si tienes sistema de login, asume que el ID está guardado en self.parent.id_usuario_actual
+        # Si no lo tienes aún, esto actúa como Placeholder (ej. -1 no excluye a nadie por ahora)
+        self.id_operador_actual = getattr(self.parent, "id_usuario_actual", -1) 
+        
+        # Filtramos al operador para que no sea seleccionable como árbitro en la pista
+        oficiales_todos = self.parent.db.obtener_oficiales() if hasattr(self.parent, 'db') else []
+        self.oficiales_db = [o for o in oficiales_todos if o['id'] != self.id_operador_actual]
         self.nombres_oficiales = [f"{o['apellidos']}, {o['nombre']}" for o in self.oficiales_db]
+
+        # --- NUEVO: SELECTOR DE TAPIZ ---
+        tapices_disponibles = [f"Tapiz {chr(65+i)}" for i in range(self.num_tapices)] # Genera Tapiz A, B, C...
+        
+        frame_top_info = ttk.Frame(self)
+        frame_top_info.pack(fill="x", pady=5, padx=10)
         
         self.title("Marcador Oficial UWW - Combate en Curso")
         
@@ -417,4 +436,15 @@ class VentanaCombate(tk.Toplevel):
             totales = {'rojo': self.score_rojo.get(), 'azul': self.score_azul.get()}
             
             self.callback_ganador(self.match_node['match_id'], ganador_dsq, motivo, id_arb, id_jue, id_jef, historial_limpio, totales)
+            self.destroy()
+    
+    def intentar_cerrar(self):
+        """Intercepta el cierre de la ventana para liberar la pelea en la BD y Cartelera."""
+        respuesta = messagebox.askyesno("Cancelar Combate", 
+            "¿Está seguro que desea cancelar este combate en progreso?\n\n"
+            "Toda la puntuación actual se perderá y la pelea volverá a estar libre en la cartelera.")
+        
+        if respuesta:
+            if self.callback_cancelar:
+                self.callback_cancelar()
             self.destroy()

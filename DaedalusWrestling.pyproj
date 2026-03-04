@@ -28,7 +28,9 @@
     <Compile Include="utilidades.py" />
     <Compile Include="ventana_combate.py" />
     <Compile Include="ventana_editar_pelea.py" />
+    <Compile Include="ventana_login_red.py" />
     <Compile Include="ventana_nuevo_atleta.py" />
+    <Compile Include="ventana_previsualizacion_pdf.py" />
   </ItemGroup>
   <ItemGroup>
     <Content Include="Libraries.txt" />

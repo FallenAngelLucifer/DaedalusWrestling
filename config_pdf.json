@@ -1,0 +1,632 @@
+{
+    "torneo_box": {
+        "coords": [
+            75.8,
+            122.9,
+            253.7,
+            155.2
+        ],
+        "align": "Izquierda",
+        "valign": "Arriba",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "arbitro_nom": {
+        "coords": [
+            359.5,
+            105.0,
+            512.4,
+            117.4
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "arbitro_id": {
+        "coords": [
+            518.1,
+            104.5,
+            537.6,
+            117.4
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "juez_nom": {
+        "coords": [
+            360.0,
+            128.0,
+            512.9,
+            139.0
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "juez_id": {
+        "coords": [
+            518.5,
+            125.6,
+            537.1,
+            139.9
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "jefe_nom": {
+        "coords": [
+            360.0,
+            150.0,
+            511.9,
+            161.4
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "jefe_id": {
+        "coords": [
+            518.6,
+            149.6,
+            536.7,
+            162.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "fecha": {
+        "coords": [
+            72.9,
+            192.4,
+            151.9,
+            206.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "match_id": {
+        "coords": [
+            153.1,
+            193.0,
+            216.9,
+            206.8
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "peso": {
+        "coords": [
+            218.6,
+            193.0,
+            283.1,
+            206.3
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "estilo": {
+        "coords": [
+            285.3,
+            193.0,
+            356.5,
+            206.8
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "ronda": {
+        "coords": [
+            358.6,
+            193.0,
+            397.6,
+            206.3
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "fase": {
+        "coords": [
+            399.3,
+            193.5,
+            482.6,
+            206.3
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "tapiz": {
+        "coords": [
+            484.7,
+            193.0,
+            538.0,
+            206.8
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "rojo_nom": {
+        "coords": [
+            72.6,
+            243.0,
+            178.5,
+            257.3
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "rojo_club": {
+        "coords": [
+            180.1,
+            243.0,
+            257.3,
+            256.8
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 7,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "rojo_id": {
+        "coords": [
+            258.6,
+            243.0,
+            286.5,
+            257.3
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "azul_nom": {
+        "coords": [
+            319.1,
+            242.6,
+            424.9,
+            257.8
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "azul_club": {
+        "coords": [
+            426.1,
+            243.3,
+            505.4,
+            256.9
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 7,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "azul_id": {
+        "coords": [
+            507.6,
+            242.6,
+            535.4,
+            257.4
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 8,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "pts_r_p1": {
+        "coords": [
+            105.0,
+            279.0,
+            120.0,
+            299.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 10,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#cc0000",
+        "step_x": 15.0,
+        "step_y": 0.0
+    },
+    "pts_r_p2": {
+        "coords": [
+            105.0,
+            307.0,
+            120.0,
+            327.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 10,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#cc0000",
+        "step_x": 15.0,
+        "step_y": 0.0
+    },
+    "pts_a_p1": {
+        "coords": [
+            352.0,
+            279.0,
+            366.0,
+            299.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 10,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#0000cc",
+        "step_x": 15.0,
+        "step_y": 0.0
+    },
+    "pts_a_p2": {
+        "coords": [
+            352.0,
+            307.0,
+            367.0,
+            327.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 10,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#0000cc",
+        "step_x": 15.0,
+        "step_y": 0.0
+    },
+    "subtot_r_p1": {
+        "coords": [
+            258.6,
+            280.0,
+            286.9,
+            299.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 11,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#cc0000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "subtot_r_p2": {
+        "coords": [
+            258.6,
+            307.5,
+            286.9,
+            326.5
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 11,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#cc0000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "subtot_a_p1": {
+        "coords": [
+            507.1,
+            279.9,
+            535.9,
+            298.9
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 11,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#0000cc",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "subtot_a_p2": {
+        "coords": [
+            507.6,
+            307.4,
+            535.9,
+            326.9
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 11,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#0000cc",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "total_pts_r": {
+        "coords": [
+            72.9,
+            343.6,
+            102.9,
+            360.2
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 16,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#cc0000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "total_pts_a": {
+        "coords": [
+            507.1,
+            344.1,
+            535.7,
+            359.3
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 16,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#0000cc",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "clas_pts_r": {
+        "coords": [
+            227.3,
+            393.0,
+            288.3,
+            410.3
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 16,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#cc0000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "clas_pts_a": {
+        "coords": [
+            320.7,
+            393.0,
+            381.0,
+            410.3
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 16,
+        "bold": true,
+        "italic": false,
+        "underline": false,
+        "color": "#0000cc",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "ganador_nom": {
+        "coords": [
+            75.0,
+            438.0,
+            383.0,
+            451.0
+        ],
+        "align": "Izquierda",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 9,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "hora_fin": {
+        "coords": [
+            384.0,
+            438.0,
+            537.3,
+            451.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 11,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#000000",
+        "step_x": 0.0,
+        "step_y": 0.0
+    },
+    "check_vic": {
+        "coords": [
+            75.0,
+            486.0,
+            106.0,
+            496.0
+        ],
+        "align": "Centro",
+        "valign": "Medio",
+        "font": "Helvetica",
+        "size": 10,
+        "bold": false,
+        "italic": false,
+        "underline": false,
+        "color": "#00aa00",
+        "step_x": 0.0,
+        "step_y": 22.65
+    }
+}

@@ -30,6 +30,9 @@ class PantallaInscripcion(ttk.Frame):
         self.var_estilo_greco = tk.BooleanVar()
         self.var_estilo_femenina = tk.BooleanVar()
 
+        self.oficiales_db = self.db.obtener_oficiales()
+        self.nombres_oficiales = [f"{o['apellidos']}, {o['nombre']}" for o in self.oficiales_db]
+
         self.crear_interfaz()
         self.cargar_datos_bd()
 
@@ -37,25 +40,34 @@ class PantallaInscripcion(ttk.Frame):
         self.todo_bloqueado = False
 
     def crear_interfaz(self):
-        lbl_titulo = ttk.Label(self, text="Fase 1: Configuración de Torneo e Inscripciones", font=("Helvetica", 16, "bold"))
-        lbl_titulo.pack(pady=10)
+        lbl_titulo = ttk.Label(self, text="Fase 1: Configuración de Torneo e Inscripciones", font=("Helvetica", 14, "bold"))
+        lbl_titulo.pack(pady=(10, 5)) # Mayor margen superior para respirar
 
-        # ================= FRAME 1: DATOS DEL TORNEO =================
-        self.torneo_frame = ttk.LabelFrame(self, text="1. Datos Generales del Torneo", padding=10)
-        self.torneo_frame.pack(fill="x", padx=20, pady=5)
+        # --- CONTENEDOR SUPERIOR ---
+        top_container = ttk.Frame(self)
+        top_container.pack(fill="x", padx=15, pady=5) # Aumentado el padding exterior
 
+        # ================= FRAME 1: DATOS DEL TORNEO (Izquierda) =================
+        self.torneo_frame = ttk.LabelFrame(top_container, text="1. Datos Generales del Torneo", padding=10) # Padding interno vuelto a 10
+        self.torneo_frame.pack(side="left", fill="both", expand=True, padx=(0, 10))
+
+        # Distribuir el espacio vertical uniformemente
+        self.torneo_frame.rowconfigure(0, weight=1)
+        self.torneo_frame.rowconfigure(1, weight=1)
+        self.torneo_frame.rowconfigure(2, weight=1)
+        self.torneo_frame.rowconfigure(3, weight=1)
+
+        # pady aumentado a 5
         ttk.Label(self.torneo_frame, text="Nombre:").grid(row=0, column=0, sticky="w", pady=5, padx=5)
-        self.ent_tor_nombre = ttk.Entry(self.torneo_frame, width=40)
-        # CAMBIO: columnspan=3 para que abarque hasta el final
+        self.ent_tor_nombre = ttk.Entry(self.torneo_frame, width=35)
         self.ent_tor_nombre.grid(row=0, column=1, columnspan=3, sticky="we", pady=5, padx=5)
 
         ttk.Label(self.torneo_frame, text="Lugar:").grid(row=1, column=0, sticky="w", pady=5, padx=5)
-        self.ent_tor_lugar = ttk.Entry(self.torneo_frame, width=40)
-        # CAMBIO: Eliminado columnspan=2 para que no choque con Ciudad
+        self.ent_tor_lugar = ttk.Entry(self.torneo_frame, width=20)
         self.ent_tor_lugar.grid(row=1, column=1, sticky="w", pady=5, padx=5)
 
         ttk.Label(self.torneo_frame, text="Ciudad:").grid(row=1, column=2, sticky="e", pady=5, padx=5)
-        self.cmb_tor_ciudad = ComboBuscador(self.torneo_frame, state="readonly", width=25)
+        self.cmb_tor_ciudad = ComboBuscador(self.torneo_frame, state="readonly", width=18)
         self.cmb_tor_ciudad.grid(row=1, column=3, sticky="w", pady=5, padx=5)
 
         ttk.Label(self.torneo_frame, text="Fecha Realización:").grid(row=2, column=0, sticky="w", pady=5, padx=5)
@@ -65,273 +77,318 @@ class PantallaInscripcion(ttk.Frame):
         self.ent_tor_fecha.config(state="readonly") 
 
         ttk.Label(self.torneo_frame, text="Categoría Edad:").grid(row=2, column=2, sticky="e", pady=5, padx=5)
-        self.cmb_categoria = ComboBuscador(self.torneo_frame, state="readonly", width=25)
+        self.cmb_categoria = ComboBuscador(self.torneo_frame, state="readonly", width=18)
         self.cmb_categoria.grid(row=2, column=3, sticky="w", pady=5, padx=5)
         self.cmb_categoria.bind("<<ComboboxSelected>>", lambda e: self.actualizar_btn_nuevo_limpiar())
 
         btn_torneo_box = ttk.Frame(self.torneo_frame)
-        btn_torneo_box.grid(row=3, column=0, columnspan=4, pady=10)
+        btn_torneo_box.grid(row=3, column=0, columnspan=4, pady=(10, 0))
 
-        self.btn_confirmar_torneo = ttk.Button(btn_torneo_box, text="Confirmar Datos de Torneo", command=self.gestionar_bloqueo_torneo)
+        self.btn_confirmar_torneo = ttk.Button(btn_torneo_box, text="Confirmar Datos", command=self.gestionar_bloqueo_torneo)
         self.btn_confirmar_torneo.pack(side="left", padx=5)
 
         self.btn_cancelar_torneo = ttk.Button(btn_torneo_box, text="Cancelar Edición", command=self.cancelar_edicion_torneo)
-
-        # --- NUEVO: BOTÓN DINÁMICO ---
         self.btn_nuevo_limpiar = ttk.Button(btn_torneo_box, text="", command=self.resetear_torneo)
 
-        # --- NUEVO BOTÓN DE DEBUG ---
         self.btn_cargar_torneo = ttk.Button(btn_torneo_box, text="Cargar Torneo (Debug)", command=self.abrir_ventana_cargar_torneo)
         self.btn_cargar_torneo.pack(side="right", padx=5)
-        
-        self.torneo_debug_id = None # Variable para controlar si estamos en modo debug
+        self.torneo_debug_id = None 
 
-        # ================= CONTENEDOR CENTRAL (Formulario Izquierda / Búsqueda Derecha) =================
+        # ================= APARTADO DE GESTIÓN DE RED (Derecha) =================
+        red_container = ttk.Frame(top_container)
+        red_container.pack(side="right", fill="both", expand=True, padx=(5, 0))
+
+        self.frame_red = ttk.LabelFrame(red_container, text="Gestión de Red y Operador", padding=10) # padding=10
+        self.frame_red.pack(fill="both", expand=True)
+        
+        self.lbl_tapete_master = ttk.Label(self.frame_red, text="🥇 Tapete Máster: (Esperando creación de sala...)", font=("Helvetica", 9, "bold"))
+        self.lbl_tapete_master.pack(anchor="w", pady=(0, 5))
+
+        # --- Sub-contenedor: Tabla (Izquierda) + Botones Verticales (Derecha) ---
+        net_middle_frame = ttk.Frame(self.frame_red)
+        net_middle_frame.pack(fill="both", expand=True, pady=(0, 5))
+
+        columnas_red = ("id", "nombre", "dispositivo", "tapiz", "estado")
+        self.tabla_red = ttk.Treeview(net_middle_frame, columns=columnas_red, show="headings", height=3)
+        self.tabla_red.bind("<<TreeviewSelect>>", self.gestionar_estado_botones_red)
+        self.tabla_red.heading("id", text="ID"); self.tabla_red.column("id", width=30, anchor="center")
+        self.tabla_red.heading("nombre", text="Árbitro"); self.tabla_red.column("nombre", width=100, anchor="w")
+        self.tabla_red.heading("dispositivo", text="Dispositivo"); self.tabla_red.column("dispositivo", width=80, anchor="w")
+        self.tabla_red.heading("tapiz", text="Tapiz"); self.tabla_red.column("tapiz", width=70, anchor="center")
+        self.tabla_red.heading("estado", text="Estado"); self.tabla_red.column("estado", width=0, stretch=tk.NO)
+        self.tabla_red.tag_configure("confirmado", background="white")
+        self.tabla_red.tag_configure("pendiente", background="#e9ecef")
+        self.tabla_red.tag_configure("yo_mismo", background="#ffff99") # <-- NUEVO: Color amarillo
+        self.tabla_red.pack(side="left", fill="both", expand=True)
+
+        # --- Botones Verticales de Gestión de Árbitro ---
+        frame_controles_red = ttk.Frame(net_middle_frame)
+        frame_controles_red.pack(side="right", fill="y", padx=(5, 0))
+
+        self.btn_confirmar_red = ttk.Button(frame_controles_red, text="Confirmar Árbitro", command=self.confirmar_arbitro_red, state="disabled")
+        self.btn_confirmar_red.pack(fill="x", pady=5)
+
+        self.btn_eliminar_red = ttk.Button(frame_controles_red, text="Eliminar Árbitro", command=self.eliminar_arbitro_red, state="disabled")
+        self.btn_eliminar_red.pack(fill="x", pady=5)
+
+        self.btn_intercambiar_tapiz = ttk.Button(frame_controles_red, text="Intercambiar", command=self.intercambiar_tapiz, width=12, state="disabled")
+        self.btn_intercambiar_tapiz.pack(fill="x", pady=5)
+
+        self.btn_ceder_master = ttk.Button(frame_controles_red, text="Ceder Máster", command=self.ceder_master, width=12, state="disabled")
+        self.btn_ceder_master.pack(fill="x", pady=(0, 5))
+
+        # --- Contenedor Inferior: Botones de Colores Compartiendo Fila ---
+        botones_finales_red = ttk.Frame(self.frame_red)
+        botones_finales_red.pack(fill="x", pady=(5, 0))
+
+        texto_btn_guardar = "✅ Confirmar y Crear Sala" 
+        self.btn_guardar_torneo = tk.Button(botones_finales_red, text=texto_btn_guardar, bg="#28a745", fg="white", font=("Helvetica", 9, "bold"), command=self.guardar_solo_torneo, state="disabled")
+        self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        
+        self.btn_avanzar_pareo = tk.Button(botones_finales_red, text="Fase de Llaves ➡", bg="#007bff", fg="white", font=("Helvetica", 9, "bold"), command=self.avanzar_fase_dos, state="disabled")
+        self.btn_avanzar_pareo.pack(side="right", fill="x", expand=True, padx=(2, 0))
+
+        # ================= CONTENEDOR CENTRAL =================
         middle_container = ttk.Frame(self)
-        middle_container.pack(fill="x", padx=20, pady=5)
+        middle_container.pack(fill="x", padx=15, pady=5) # padding aumentado
 
         # --- FRAME 2: INSCRIPCIÓN (Izquierda) ---
-        self.form_frame = ttk.LabelFrame(middle_container, text="2. Inscripción y Pesaje (Confirmar torneo para habilitar)", padding=10)
+        self.form_frame = ttk.LabelFrame(middle_container, text="2. Inscripción y Pesaje", padding=10) # padding=10
         self.form_frame.pack(side="left", fill="both", padx=(0, 10))
 
-        ttk.Label(self.form_frame, text="Atleta:").grid(row=0, column=0, sticky="w", pady=5, padx=5)
-        # REDUCCIÓN DE ANCHO AQUÍ (De 40 a 28 para ahorrar espacio)
-        self.cmb_atleta = ComboBuscador(self.form_frame, state="readonly", width=28)
-        self.cmb_atleta.grid(row=0, column=1, sticky="w", pady=5, padx=5)
+        # pady aumentado a 7 para mayor holgura vertical
+        ttk.Label(self.form_frame, text="Atleta:").grid(row=0, column=0, sticky="w", pady=7, padx=5) 
+        self.cmb_atleta = ComboBuscador(self.form_frame, state="readonly", width=25)
+        self.cmb_atleta.grid(row=0, column=1, sticky="w", pady=7, padx=5)
         self.cmb_atleta.bind("<<ComboboxSelected>>", self.al_seleccionar_atleta)
         self.cmb_atleta.bind("<KeyRelease>", self.al_seleccionar_atleta, add="+")
 
-        # --- CAMBIO 1: Botón de "Añadir a Memoria" sube aquí ---
         self.btn_agregar = ttk.Button(self.form_frame, text="Añadir a Memoria", command=self.agregar_a_memoria)
         self.btn_agregar.grid(row=0, column=2, sticky="w", padx=5)
 
-        # --- SUSTITUIR EL ENTRY ANTIGUO POR ESTO ---
         vcmd_peso = (self.register(self.validar_peso), '%P')
-        ttk.Label(self.form_frame, text="Peso Exacto (kg):").grid(row=1, column=0, sticky="w", pady=5, padx=5)
+        ttk.Label(self.form_frame, text="Peso (kg):").grid(row=1, column=0, sticky="w", pady=7, padx=5) 
         
-        # Frame para agrupar el Spinner y la Etiqueta Dinámica
         frame_peso_dinamico = ttk.Frame(self.form_frame)
-        frame_peso_dinamico.grid(row=1, column=1, columnspan=2, sticky="w", pady=5, padx=5)
-        
+        frame_peso_dinamico.grid(row=1, column=1, columnspan=2, sticky="w", pady=7, padx=5) 
         self.var_peso = tk.StringVar()
         self.var_peso.trace_add("write", lambda *args: self.actualizar_categoria_dinamica())
-        
-        self.ent_peso = ttk.Spinbox(frame_peso_dinamico, from_=20.0, to=150.0, increment=0.1, width=10, 
-                                    validate='key', validatecommand=vcmd_peso, textvariable=self.var_peso)
+        self.ent_peso = ttk.Spinbox(frame_peso_dinamico, from_=20.0, to=150.0, increment=0.1, width=8, validate='key', validatecommand=vcmd_peso, textvariable=self.var_peso)
         self.ent_peso.pack(side="left")
-        
-        self.lbl_cat_dinamica = ttk.Label(frame_peso_dinamico, text="Categoría: --", foreground="gray", font=("Helvetica", 9, "italic"))
-        self.lbl_cat_dinamica.pack(side="left", padx=10)
+        self.lbl_cat_dinamica = ttk.Label(frame_peso_dinamico, text="Categoría: --", foreground="gray", font=("Helvetica", 8, "italic"))
+        self.lbl_cat_dinamica.pack(side="left", padx=5)
 
-        # --- AÑADIR COMMAND A LOS CHECKBUTTONS PARA QUE REACCIONEN ---
         estilos_frame = ttk.Frame(self.form_frame)
-        estilos_frame.grid(row=2, column=0, columnspan=3, sticky="w", pady=5, padx=5)
-        self.chk_libre = ttk.Checkbutton(estilos_frame, text="Estilo Libre", variable=self.var_estilo_libre, command=self.actualizar_categoria_dinamica)
+        estilos_frame.grid(row=2, column=0, columnspan=3, sticky="w", pady=7, padx=5) 
+        self.chk_libre = ttk.Checkbutton(estilos_frame, text="Libre", variable=self.var_estilo_libre, command=self.actualizar_categoria_dinamica)
         self.chk_libre.pack(side="left", padx=(0, 10))
-        self.chk_greco = ttk.Checkbutton(estilos_frame, text="Grecorromana", variable=self.var_estilo_greco, command=self.actualizar_categoria_dinamica)
+        self.chk_greco = ttk.Checkbutton(estilos_frame, text="Greco", variable=self.var_estilo_greco, command=self.actualizar_categoria_dinamica)
         self.chk_greco.pack(side="left", padx=10)
-        self.chk_femenina = ttk.Checkbutton(estilos_frame, text="Femenina", variable=self.var_estilo_femenina, command=self.actualizar_categoria_dinamica)
+        self.chk_femenina = ttk.Checkbutton(estilos_frame, text="Fem", variable=self.var_estilo_femenina, command=self.actualizar_categoria_dinamica)
         self.chk_femenina.pack(side="left", padx=10)
 
         botones_form_frame = ttk.Frame(self.form_frame)
         botones_form_frame.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="w", padx=5)
-
-        # --- CAMBIO 1: Botón de "Gestión BD Atletas" baja aquí ---
         self.btn_nuevo_atleta = ttk.Button(botones_form_frame, text="+ Gestión BD Atletas", command=self.abrir_ventana_nuevo)
         self.btn_nuevo_atleta.pack(side="left", padx=(0, 5))
-        
         self.btn_cancelar_edicion = ttk.Button(botones_form_frame, text="Cancelar Edición", command=self.cancelar_edicion)
 
-        # --- NUEVO PANEL DE BÚSQUEDA Y FILTROS OPTIMIZADO (Derecha) ---
-        self.panel_busqueda = ttk.LabelFrame(middle_container, text="Filtros y Búsqueda Avanzada", padding=10)
+        # --- PANEL DE BÚSQUEDA Y FILTROS (Derecha) ---
+        self.panel_busqueda = ttk.LabelFrame(middle_container, text="Filtros y Búsqueda Avanzada", padding=10) # padding=10
         self.panel_busqueda.pack(side="left", fill="both", expand=True)
         
-        # Sub-contenedor Izquierdo (Inputs y Sexo)
         frame_busq_izq = ttk.Frame(self.panel_busqueda)
-        frame_busq_izq.pack(side="left", fill="y", padx=(0, 15))
+        frame_busq_izq.pack(side="left", fill="y", padx=(0, 10))
         
-        ttk.Label(frame_busq_izq, text="Buscar por:").grid(row=0, column=0, sticky="w", pady=2)
-        
-        # Opciones fijas (Usamos Combobox estándar porque no necesitamos buscador interno aquí)
-        self.cmb_tipo_busqueda = ttk.Combobox(frame_busq_izq, values=["ID", "Nombre", "Club", "Ciudad"], state="readonly", width=10)
+        ttk.Label(frame_busq_izq, text="Buscar por:").grid(row=0, column=0, sticky="w", pady=5)
+        self.cmb_tipo_busqueda = ttk.Combobox(frame_busq_izq, values=["ID", "Nombre", "Club", "Ciudad"], state="readonly", width=8)
         self.cmb_tipo_busqueda.set("Nombre")
-        self.cmb_tipo_busqueda.grid(row=0, column=1, sticky="w", pady=2, padx=(5, 0))
+        self.cmb_tipo_busqueda.grid(row=0, column=1, sticky="w", pady=5, padx=(2, 0))
         
-        # --- BARRA DE BÚSQUEDA ÚNICA E INTELIGENTE ---
         self.vcmd_id = (self.register(self.validar_solo_numeros), '%P')
-        self.ent_busqueda = ttk.Entry(frame_busq_izq, width=22)
+        self.ent_busqueda = ttk.Entry(frame_busq_izq, width=18)
         self.ent_busqueda.grid(row=1, column=0, columnspan=2, sticky="we", pady=5)
-        
-        # Eventos
         self.ent_busqueda.bind("<KeyRelease>", self.actualizar_tabla_visual)
         self.cmb_tipo_busqueda.bind("<<ComboboxSelected>>", self.cambiar_tipo_busqueda)
-        
-        # Aplicar configuración inicial
         self.cambiar_tipo_busqueda()
         
         frame_sexo = ttk.Frame(frame_busq_izq)
         frame_sexo.grid(row=2, column=0, columnspan=2, sticky="w", pady=5)
         ttk.Label(frame_sexo, text="Sexo:").pack(side="left", padx=(0,5))
-        self.var_filtro_m = tk.BooleanVar(value=True)
-        self.var_filtro_f = tk.BooleanVar(value=True)
-        ttk.Checkbutton(frame_sexo, text="M", variable=self.var_filtro_m, command=self.actualizar_tabla_visual).pack(side="left", padx=2)
-        ttk.Checkbutton(frame_sexo, text="F", variable=self.var_filtro_f, command=self.actualizar_tabla_visual).pack(side="left", padx=2)
+        self.var_filtro_m = tk.BooleanVar(value=True); self.var_filtro_f = tk.BooleanVar(value=True)
+        ttk.Checkbutton(frame_sexo, text="M", variable=self.var_filtro_m, command=self.actualizar_tabla_visual).pack(side="left")
+        ttk.Checkbutton(frame_sexo, text="F", variable=self.var_filtro_f, command=self.actualizar_tabla_visual).pack(side="left")
         
-        ttk.Button(frame_busq_izq, text="Limpiar Filtros", command=self.limpiar_filtros).grid(row=3, column=0, columnspan=2, pady=(5, 0), sticky="we")
+        ttk.Button(frame_busq_izq, text="Limpiar Filtros", command=self.limpiar_filtros).grid(row=3, column=0, columnspan=2, pady=(10, 0), sticky="we")
 
-        # Sub-contenedor Derecho (Listboxes en Paralelo)
         frame_listas = ttk.Frame(self.panel_busqueda)
         frame_listas.pack(side="left", fill="both", expand=True)
 
-        # --- LISTA DE PESOS CON BUSCADOR ---
         frame_peso = ttk.Frame(frame_listas)
         frame_peso.pack(side="left", fill="both", expand=True, padx=(0, 5))
-        
-        lbl_peso_box = ttk.Frame(frame_peso)
-        lbl_peso_box.pack(fill="x")
-        ttk.Label(lbl_peso_box, text="Categoría / Peso:").pack(side="left")
-        ttk.Button(lbl_peso_box, text="Ninguno", width=8, command=lambda: self.limpiar_listbox(self.listbox_pesos)).pack(side="right")
-        
-        # Buscador de Pesos COMPACTO (Entry + Botón X)
-        search_peso_frame = ttk.Frame(frame_peso)
-        search_peso_frame.pack(fill="x", pady=(2, 2))
-        self.ent_buscar_peso = ttk.Entry(search_peso_frame, width=15)
-        self.ent_buscar_peso.pack(side="left", fill="x", expand=True)
-        # Etiqueta que simula un botón pequeño
-        btn_clear_peso = tk.Label(search_peso_frame, text="✕", fg="gray", cursor="hand2", font=("Helvetica", 9, "bold"))
-        btn_clear_peso.pack(side="right", padx=3)
-        
+        lbl_peso_box = ttk.Frame(frame_peso); lbl_peso_box.pack(fill="x")
+        ttk.Label(lbl_peso_box, text="Categoría:").pack(side="left")
+        ttk.Button(lbl_peso_box, text="Ninguno", width=6, command=lambda: self.limpiar_listbox(self.listbox_pesos)).pack(side="right")
+        search_peso_frame = ttk.Frame(frame_peso); search_peso_frame.pack(fill="x", pady=(2, 2))
+        self.ent_buscar_peso = ttk.Entry(search_peso_frame, width=12); self.ent_buscar_peso.pack(side="left", fill="x", expand=True)
+        btn_clear_peso = tk.Label(search_peso_frame, text="✕", fg="gray", cursor="hand2", font=("Helvetica", 8, "bold")); btn_clear_peso.pack(side="right", padx=1)
         self.ent_buscar_peso.bind("<KeyRelease>", lambda e: self.filtrar_listbox(self.listbox_pesos, self.ent_buscar_peso, self.pesos_memoria_completa))
         btn_clear_peso.bind("<Button-1>", lambda e: self.limpiar_buscador(self.ent_buscar_peso, self.listbox_pesos, self.pesos_memoria_completa))
 
-        frame_peso_scroll = ttk.Frame(frame_peso)
-        frame_peso_scroll.pack(fill="both", expand=True)
+        frame_peso_scroll = ttk.Frame(frame_peso); frame_peso_scroll.pack(fill="both", expand=True)
         scroll_peso = ttk.Scrollbar(frame_peso_scroll, orient="vertical")
-        self.listbox_pesos = tk.Listbox(frame_peso_scroll, selectmode="multiple", height=5, width=14, yscrollcommand=scroll_peso.set, exportselection=False)
+        self.listbox_pesos = tk.Listbox(frame_peso_scroll, selectmode="multiple", height=3, width=12, yscrollcommand=scroll_peso.set, exportselection=False)
         scroll_peso.config(command=self.listbox_pesos.yview)
-        self.listbox_pesos.pack(side="left", fill="both", expand=True)
-        scroll_peso.pack(side="right", fill="y")
+        self.listbox_pesos.pack(side="left", fill="both", expand=True); scroll_peso.pack(side="right", fill="y")
         self.listbox_pesos.bind("<<ListboxSelect>>", self.actualizar_tabla_visual)
         
-        # --- LISTA DE ESTILOS CON BUSCADOR ---
         frame_estilo = ttk.Frame(frame_listas)
         frame_estilo.pack(side="left", fill="both", expand=True)
-        
-        lbl_estilo_box = ttk.Frame(frame_estilo)
-        lbl_estilo_box.pack(fill="x")
+        lbl_estilo_box = ttk.Frame(frame_estilo); lbl_estilo_box.pack(fill="x")
         ttk.Label(lbl_estilo_box, text="Estilos:").pack(side="left")
-        ttk.Button(lbl_estilo_box, text="Ninguno", width=8, command=lambda: self.limpiar_listbox(self.listbox_estilos)).pack(side="right")
-        
-        # Buscador de Estilos COMPACTO (Entry + Botón X)
-        search_estilo_frame = ttk.Frame(frame_estilo)
-        search_estilo_frame.pack(fill="x", pady=(2, 2))
-        self.ent_buscar_estilo = ttk.Entry(search_estilo_frame, width=15)
-        self.ent_buscar_estilo.pack(side="left", fill="x", expand=True)
-        # Etiqueta que simula un botón pequeño
-        btn_clear_estilo = tk.Label(search_estilo_frame, text="✕", fg="gray", cursor="hand2", font=("Helvetica", 9, "bold"))
-        btn_clear_estilo.pack(side="right", padx=3)
-        
+        ttk.Button(lbl_estilo_box, text="Ninguno", width=6, command=lambda: self.limpiar_listbox(self.listbox_estilos)).pack(side="right")
+        search_estilo_frame = ttk.Frame(frame_estilo); search_estilo_frame.pack(fill="x", pady=(2, 2))
+        self.ent_buscar_estilo = ttk.Entry(search_estilo_frame, width=12); self.ent_buscar_estilo.pack(side="left", fill="x", expand=True)
+        btn_clear_estilo = tk.Label(search_estilo_frame, text="✕", fg="gray", cursor="hand2", font=("Helvetica", 8, "bold")); btn_clear_estilo.pack(side="right", padx=1)
         self.ent_buscar_estilo.bind("<KeyRelease>", lambda e: self.filtrar_listbox(self.listbox_estilos, self.ent_buscar_estilo, self.estilos_memoria_completa))
         btn_clear_estilo.bind("<Button-1>", lambda e: self.limpiar_buscador(self.ent_buscar_estilo, self.listbox_estilos, self.estilos_memoria_completa))
 
-        frame_estilo_scroll = ttk.Frame(frame_estilo)
-        frame_estilo_scroll.pack(fill="both", expand=True)
+        frame_estilo_scroll = ttk.Frame(frame_estilo); frame_estilo_scroll.pack(fill="both", expand=True)
         scroll_estilo = ttk.Scrollbar(frame_estilo_scroll, orient="vertical")
-        self.listbox_estilos = tk.Listbox(frame_estilo_scroll, selectmode="multiple", height=5, width=14, yscrollcommand=scroll_estilo.set, exportselection=False)
+        self.listbox_estilos = tk.Listbox(frame_estilo_scroll, selectmode="multiple", height=3, width=12, yscrollcommand=scroll_estilo.set, exportselection=False)
         scroll_estilo.config(command=self.listbox_estilos.yview)
-        self.listbox_estilos.pack(side="left", fill="both", expand=True)
-        scroll_estilo.pack(side="right", fill="y")
+        self.listbox_estilos.pack(side="left", fill="both", expand=True); scroll_estilo.pack(side="right", fill="y")
         self.listbox_estilos.bind("<<ListboxSelect>>", self.al_cambiar_filtro_estilo)
 
-        # Listas en memoria para no perder datos al buscar
         self.pesos_memoria_completa = []
         self.estilos_memoria_completa = []
 
-        # ================= FRAME 3: TABLA DE MEMORIA OPTIMIZADA =================
-        tabla_frame = ttk.LabelFrame(self, text="3. Atletas en Memoria (Pendientes de Subir)", padding=10)
-        tabla_frame.pack(fill="both", expand=True, padx=20, pady=5)
+        # ================= FRAME 3: TABLA DE MEMORIA =================
+        tabla_frame = ttk.LabelFrame(self, text="3. Atletas en Memoria (Pendientes de Subir)", padding=10) # padding=10
+        tabla_frame.pack(fill="both", expand=True, padx=15, pady=(5, 10))
 
-        # --- 1. FALSO ENCABEZADO (Modo Oscuro sin afectar el tema global) ---
-        header_frame = tk.Frame(tabla_frame, height=25)
+        header_frame = tk.Frame(tabla_frame, height=22)
         header_frame.pack(fill="x")
-        header_frame.pack_propagate(False) # Congela la altura
+        header_frame.pack_propagate(False) 
 
         def crear_celda(texto, ancho):
             celda = tk.Frame(header_frame, width=ancho, bg="#2a2a2a", highlightbackground="#555555", highlightthickness=1)
             celda.pack(side="left", fill="y")
             celda.pack_propagate(False)
-            tk.Label(celda, text=texto, bg="#2a2a2a", fg="white", font=("Helvetica", 9, "bold")).pack(expand=True)
+            tk.Label(celda, text=texto, bg="#2a2a2a", fg="white", font=("Helvetica", 8, "bold")).pack(expand=True)
 
-        # Se usan los mismos anchos de tus columnas originales
-        crear_celda("ID BD", 50)
-        crear_celda("Atleta", 180)
-        crear_celda("Sexo", 50)
-        crear_celda("Club", 150)
-        crear_celda("Ciudad", 150)
-        crear_celda("Peso Dado", 110)
-        crear_celda("Peso Oficial", 110)
+        crear_celda("ID", 40)
+        crear_celda("Atleta", 160)
+        crear_celda("Sexo", 40)
+        crear_celda("Club", 120)
+        crear_celda("Ciudad", 120)
+        crear_celda("Peso Dado", 90)
+        crear_celda("Peso Oficial", 90)
 
-        # --- SOLUCIÓN: Eliminamos el "filler" y hacemos que el encabezado "Estilos" se expanda ---
         celda_estilos = tk.Frame(header_frame, bg="#2a2a2a", highlightbackground="#555555", highlightthickness=1)
-        celda_estilos.pack(side="left", fill="both", expand=True) # expand=True llena el vacío
-        tk.Label(celda_estilos, text="Estilos", bg="#2a2a2a", fg="white", font=("Helvetica", 9, "bold")).pack(expand=True)
+        celda_estilos.pack(side="left", fill="both", expand=True) 
+        tk.Label(celda_estilos, text="Estilos", bg="#2a2a2a", fg="white", font=("Helvetica", 8, "bold")).pack(expand=True)
 
-        # --- 2. TABLA SIN ENCABEZADOS NATIVOS ---
         columnas = ("id", "idx_local", "atleta", "sexo", "club", "ciudad", "peso", "peso_oficial", "estilos")
-        self.tabla = ttk.Treeview(tabla_frame, columns=columnas, show="", height=6)
         
-        # Ocultar la columna fantasma izquierda
+        # TABLA REDUCIDA (height=3 en vez de 4) para permitir que los elementos superiores usen el espacio
+        self.tabla = ttk.Treeview(tabla_frame, columns=columnas, show="", height=3)
+        
         self.tabla.column("#0", width=0, stretch=tk.NO)
-        
-        # Columnas fijas para que no se descuadren
-        self.tabla.column("id", width=50, anchor="center", stretch=False) 
+        self.tabla.column("id", width=40, anchor="center", stretch=False) 
         self.tabla.column("idx_local", width=0, stretch=tk.NO) 
-        self.tabla.column("atleta", width=180, anchor="w", stretch=False)
-        self.tabla.column("sexo", width=50, anchor="center", stretch=False)
-        self.tabla.column("club", width=150, anchor="w", stretch=False)
-        self.tabla.column("ciudad", width=150, anchor="w", stretch=False)
-        self.tabla.column("peso", width=110, anchor="center", stretch=False)
-        self.tabla.column("peso_oficial", width=110, anchor="center", stretch=False)
-        
-        # --- SOLUCIÓN: La última columna se estira (stretch=True) para acompañar al encabezado ---
-        self.tabla.column("estilos", width=140, anchor="w", stretch=True)
+        self.tabla.column("atleta", width=160, anchor="w", stretch=False)
+        self.tabla.column("sexo", width=40, anchor="center", stretch=False)
+        self.tabla.column("club", width=120, anchor="w", stretch=False)
+        self.tabla.column("ciudad", width=120, anchor="w", stretch=False)
+        self.tabla.column("peso", width=90, anchor="center", stretch=False)
+        self.tabla.column("peso_oficial", width=90, anchor="center", stretch=False)
+        self.tabla.column("estilos", width=120, anchor="w", stretch=True)
         
         self.tabla.pack(side="top", fill="both", expand=True)
-        
-        # Tag para pintar en rojo a los descalificados
         self.tabla.tag_configure("dsq", foreground="#dc3545")
 
         btn_box = ttk.Frame(tabla_frame)
         btn_box.pack(fill="x", pady=5)
 
-        # --- 1. SUB-CONTENEDOR DE BOTONES (Garantiza que siempre estén a la izquierda) ---
         self.frame_acciones_memoria = ttk.Frame(btn_box)
         self.frame_acciones_memoria.pack(side="left")
 
-        self.btn_eliminar_memoria = ttk.Button(self.frame_acciones_memoria, text="Eliminar Seleccionado", command=self.eliminar_de_memoria, state="disabled")
-        self.btn_eliminar_memoria.pack(side="left", padx=5)
+        self.btn_eliminar_memoria = ttk.Button(self.frame_acciones_memoria, text="Eliminar", command=self.eliminar_de_memoria, state="disabled")
+        self.btn_eliminar_memoria.pack(side="left", padx=2)
         
-        self.btn_editar_memoria = ttk.Button(self.frame_acciones_memoria, text="Editar Seleccionado", command=self.cargar_para_editar, state="disabled")
-        self.btn_editar_memoria.pack(side="left", padx=5)
+        self.btn_editar_memoria = ttk.Button(self.frame_acciones_memoria, text="Editar", command=self.cargar_para_editar, state="disabled")
+        self.btn_editar_memoria.pack(side="left", padx=2)
 
-        # --- 2. ETIQUETA (Siempre a la derecha de los botones) ---
-        self.lbl_estadisticas = ttk.Label(btn_box, text="Atletas: 0  |  Clubes: 0  |  Ciudades: 0", foreground="#28a745", font=("Helvetica", 9, "bold"))
-        self.lbl_estadisticas.pack(side="left", padx=(15, 0))
+        # Alineación de la etiqueta a la derecha (side="right") y se omite el botón repetido
+        self.lbl_estadisticas = ttk.Label(btn_box, text="Atletas: 0  |  Clubes: 0  |  Ciudades: 0", foreground="#28a745", font=("Helvetica", 8, "bold"))
+        self.lbl_estadisticas.pack(side="right", padx=(0, 10))
         
-        # --- 3. BOTONES DE GUARDADO (A la derecha de la pantalla) ---
-        self.btn_subir_bd = ttk.Button(btn_box, text="Confirmar y Subir a Base de Datos", command=self.subir_inscripciones_bd)
-        self.btn_subir_bd.pack(side="right")
-        
-        self.btn_guardar_progreso = ttk.Button(btn_box, text="💾 Guardar Progreso", command=self.guardar_progreso)
-        self.btn_guardar_progreso.pack(side="right", padx=10)
+        self.tabla.bind("<<TreeviewSelect>>", self.al_seleccionar_tabla)
+        self.tabla.bind("<Double-1>", self.on_double_click_tabla)
 
         self.cambiar_estado_inscripcion("disabled")
-        
-        # --- NUEVOS EVENTOS: Escuchar selección y Doble Clic ---
-        self.tabla.bind("<<TreeviewSelect>>", self.al_seleccionar_tabla)
-        self.tabla.bind("<Double-1>", self.on_double_click_tabla) # <-- AÑADIR ESTA LÍNEA
-
         self.actualizar_botones_guardado()
+
+    def gestionar_estado_botones_red(self, event=None):
+        """Activa o desactiva los botones de red según las reglas exactas de selección y el rol."""
+        
+        # --- NUEVO: ESCUDO PARA INVITADOS ---
+        if not getattr(self.controller, 'es_master', False):
+            # Si un invitado intenta hacer clic, deseleccionamos la fila al instante
+            if hasattr(self, 'tabla_red') and self.tabla_red.selection():
+                self.tabla_red.selection_remove(self.tabla_red.selection())
+            
+            # Asegurar que todos los controles de red estén apagados
+            if hasattr(self, 'btn_confirmar_red'): self.btn_confirmar_red.config(state="disabled")
+            if hasattr(self, 'btn_eliminar_red'): self.btn_eliminar_red.config(state="disabled")
+            if hasattr(self, 'btn_intercambiar_tapiz'): self.btn_intercambiar_tapiz.config(state="disabled")
+            if hasattr(self, 'btn_ceder_master'): self.btn_ceder_master.config(state="disabled")
+            return
+
+        # --- LÓGICA PARA EL MÁSTER ---
+        seleccionados = self.tabla_red.selection()
+        cantidad = len(seleccionados)
+        
+        # Estado por defecto (Todo bloqueado)
+        est_conf = "disabled"
+        est_elim = "disabled"
+        est_inter = "disabled"
+        est_ceder = "disabled"
+        
+        if cantidad == 1:
+            tags = self.tabla_red.item(seleccionados[0], "tags")
+            es_yo = "yo_mismo" in tags
+            es_confirmado = "confirmado" in tags
+            es_pendiente = "pendiente" in tags
+            
+            if es_yo:
+                pass # Regla 1: Se seleccionó a sí mismo. Todo bloqueado.
+            elif es_confirmado:
+                # Regla 2: Seleccionó a alguien confirmado.
+                est_elim = "normal"
+                est_ceder = "normal"
+            elif es_pendiente:
+                # Regla 3: Seleccionó a un pendiente.
+                est_conf = "normal"
+                est_elim = "normal"
+                
+        elif cantidad == 2:
+            # Regla 4: Dos seleccionados para intercambio.
+            tags1 = self.tabla_red.item(seleccionados[0], "tags")
+            tags2 = self.tabla_red.item(seleccionados[1], "tags")
+            
+            valido1 = "confirmado" in tags1 or "yo_mismo" in tags1
+            valido2 = "confirmado" in tags2 or "yo_mismo" in tags2
+            
+            if valido1 and valido2:
+                est_inter = "normal"
+
+        # Aplicamos los estados
+        if hasattr(self, 'btn_confirmar_red'): self.btn_confirmar_red.config(state=est_conf)
+        if hasattr(self, 'btn_eliminar_red'): self.btn_eliminar_red.config(state=est_elim)
+        if hasattr(self, 'btn_intercambiar_tapiz'): self.btn_intercambiar_tapiz.config(state=est_inter)
+        if hasattr(self, 'btn_ceder_master'): self.btn_ceder_master.config(state=est_ceder)
 
     def actualizar_botones_guardado(self):
         """Evalúa las reglas visuales de los botones de subida/progreso."""
@@ -428,41 +485,6 @@ class PantallaInscripcion(ttk.Frame):
         self.actualizar_opciones_filtros()
         self.actualizar_tabla_visual()
 
-    def al_seleccionar_tabla(self, event):
-        # Si el torneo entero está cerrado, bloqueamos y salimos
-        if getattr(self, "todo_bloqueado", False):
-            if self.tabla.selection():
-                self.tabla.selection_remove(self.tabla.selection()[0])
-            self.btn_editar_memoria.config(state="disabled")
-            self.btn_eliminar_memoria.config(state="disabled")
-            return
-            
-        item_sel = self.tabla.selection()
-        
-        # Si se hace clic en el vacío, desactivar botones
-        if not item_sel: 
-            self.btn_editar_memoria.config(state="disabled")
-            self.btn_eliminar_memoria.config(state="disabled")
-            return
-            
-        valores = self.tabla.item(item_sel[0], "values")
-        id_atleta = int(valores[0])
-        
-        ins_data = next((i for i in self.inscripciones_memoria if i['id_atleta'] == id_atleta), None)
-        if not ins_data: return
-        
-        # Validar si este atleta pertenece a una llave bloqueada o está descalificado
-        is_locked = any(div_id in getattr(self, "pesos_bloqueados_ids", set()) for div_id in ins_data['ids_divisiones'])
-        is_dsq = id_atleta in getattr(self, "atletas_descalificados_ids", set())
-        
-        # Activar/Desactivar según su estado
-        if is_locked or is_dsq:
-            self.btn_editar_memoria.config(state="disabled")
-            self.btn_eliminar_memoria.config(state="disabled")
-        else:
-            self.btn_editar_memoria.config(state="normal")
-            self.btn_eliminar_memoria.config(state="normal")
-
     def on_double_click_tabla(self, event):
         """Si se hace doble clic sobre una fila, evalúa si el atleta puede ser editado automáticamente."""
         # 1. Usar identify_row es 100% preciso basándose en la coordenada Y del ratón
@@ -496,10 +518,19 @@ class PantallaInscripcion(ttk.Frame):
             # 3. Está completamente vacío
             self.btn_nuevo_limpiar.pack_forget()
 
-    def resetear_torneo(self):
+    def resetear_torneo(self, forzar=False):
         """Borra la memoria y resetea la pantalla a su estado inicial de fábrica."""
-        respuesta = messagebox.askyesno("Confirmar", "¿Está seguro de limpiar todos los datos y empezar de cero? Se perderán las inscripciones no guardadas.")
-        if not respuesta: return
+        # Si no es un reseteo forzado (ej. el usuario hizo clic en el botón), preguntamos
+        if not forzar:
+            respuesta = messagebox.askyesno("Confirmar", "¿Está seguro de limpiar todos los datos y empezar de cero? Se perderán las inscripciones no guardadas.")
+            if not respuesta: return
+        
+        # --- SALIR DE LA SALA DE RED ACTUAL Y HEREDAR MÁSTER ---
+        if hasattr(self.controller, 'id_conexion_red') and self.controller.id_conexion_red:
+            self.db.eliminar_conexion_instancia(self.controller.id_conexion_red)
+            self.controller.id_conexion_red = None
+            self.controller.es_master = False
+            self.controller.tapiz_asignado = None
 
         # 1. Resetear variables lógicas
         self.torneo_debug_id = None
@@ -569,6 +600,31 @@ class PantallaInscripcion(ttk.Frame):
         
         self.cambiar_estado_inscripcion("disabled")
         self.form_frame.config(text="2. Inscripción y Pesaje (Confirmar torneo para habilitar)")
+
+        # --- BLOQUEO DE GESTIÓN DE RED ---
+        self.escuchando_red = False
+
+        self.btn_guardar_torneo.config(
+            state="disabled", 
+            text="✅ Confirmar y Crear Sala",
+            bg="#28a745"
+        )
+        self.btn_avanzar_pareo.config(state="disabled")
+        
+        self.btn_confirmar_red.config(state="disabled")
+        self.btn_eliminar_red.config(state="disabled")
+        self.btn_intercambiar_tapiz.config(state="disabled")
+        self.btn_ceder_master.config(state="disabled")
+        
+        # Limpiar la tabla de red
+        for item in self.tabla_red.get_children():
+            self.tabla_red.delete(item)
+
+        # --- NUEVO: RESTAURAR ETIQUETA DEL MÁSTER ---
+        self.lbl_tapete_master.config(
+            text="🥇 Tapete Máster: (Esperando creación de sala...)", 
+            foreground="black" # Restauramos al color original (o el color por defecto de tu tema)
+        )
         
         # --- NUEVO: Ocultar el botón tras limpiar ---
         self.actualizar_btn_nuevo_limpiar()
@@ -725,20 +781,20 @@ class PantallaInscripcion(ttk.Frame):
         if self.btn_confirmar_torneo.cget("text") == "Modificar Torneo":
             self.ent_tor_nombre.config(state="normal")
             self.ent_tor_lugar.config(state="normal")
-            self.cmb_tor_ciudad.config(state="normal") # <-- NUEVO
+            self.cmb_tor_ciudad.config(state="normal")
             self.cmb_categoria.config(state="normal")
             self.btn_confirmar_torneo.config(text="Guardar Cambios")
             self.btn_cancelar_torneo.pack(side="left", padx=5)
             self.cambiar_estado_inscripcion("disabled")
-            self.form_frame.config(text="2. Inscripción y Pesaje (Confirmar torneo para habilitar)")
+            self.form_frame.config(text="2. Inscripción y Pesaje (Confirme datos para habilitar)")
             return
 
         nombre = self.ent_tor_nombre.get().strip()
         lugar = self.ent_tor_lugar.get().strip()
         cat = self.cmb_categoria.get()
-        ciu = self.cmb_tor_ciudad.get() # <-- NUEVO
+        ciu = self.cmb_tor_ciudad.get()
 
-        if not nombre or not lugar or not ciu or not cat: # <-- Actualizado
+        if not nombre or not lugar or not ciu or not cat:
             return messagebox.showwarning("Incompleto", "Llene nombre, lugar, ciudad y categoría.")
 
         if self.categoria_confirmada is not None and self.categoria_confirmada != cat:
@@ -754,19 +810,27 @@ class PantallaInscripcion(ttk.Frame):
         self.torneo_nombre_conf = nombre
         self.torneo_lugar_conf = lugar
         self.categoria_confirmada = cat
-        self.torneo_ciudad_conf = ciu # <-- NUEVO
+        self.torneo_ciudad_conf = ciu
 
         self.ent_tor_nombre.config(state="disabled")
         self.ent_tor_lugar.config(state="disabled")
         self.cmb_categoria.config(state="disabled")
-        self.cmb_tor_ciudad.config(state="disabled") # <-- NUEVO
+        self.cmb_tor_ciudad.config(state="disabled") 
         
         self.btn_confirmar_torneo.config(text="Modificar Torneo")
         self.btn_cancelar_torneo.pack_forget()
 
+        # --- AHORA SÍ: DESBLOQUEAMOS LAS INSCRIPCIONES ---
         self.form_frame.config(text="2. Inscripción y Pesaje (Habilitado)")
-        self.filtrar_atletas_por_edad()
         self.cambiar_estado_inscripcion("normal")
+        # Si los datos son válidos y se bloquea la edición de datos generales:
+        self.btn_guardar_torneo.config(state="normal") # Se activa para permitir "Crear Sala"
+        
+        # Habilitar controles de red
+        self.btn_confirmar_red.config(state="normal")
+        self.btn_eliminar_red.config(state="normal")
+        self.btn_intercambiar_tapiz.config(state="normal")
+        self.filtrar_atletas_por_edad()
 
         self.actualizar_btn_nuevo_limpiar()
 
@@ -1163,7 +1227,14 @@ class PantallaInscripcion(ttk.Frame):
             try: fecha_db = datetime.strptime(self.ent_tor_fecha.get().strip(), "%d/%m/%Y").strftime("%Y-%m-%d")
             except: fecha_db = datetime.now().strftime("%Y-%m-%d")
             id_ciu = self.map_ciudades_torneo.get(self.cmb_tor_ciudad.get())
-            datos_torneo = {"nombre": self.torneo_nombre_conf, "lugar": self.torneo_lugar_conf, "id_ciudad": id_ciu, "fecha": fecha_db, "id_categoria": id_cat}
+            datos_torneo = {
+                'nombre': self.var_nombre_torneo.get().strip(),
+                'id_categoria': self.categoria_seleccionada_id,
+                'lugar': self.var_lugar_torneo.get().strip(),
+                'id_ciudad': self.id_ciudad_seleccionada,
+                'fecha': self.var_fecha_torneo.get(),
+                'num_tapices': int(self.cmb_num_tapices.get()) # <--- AÑADIR ESTA LÍNEA
+            }
             
             nuevo_id = self.db.guardar_torneo_completo(datos_torneo, self.inscripciones_memoria)
             
@@ -1223,10 +1294,15 @@ class PantallaInscripcion(ttk.Frame):
     def ejecutar_carga_torneo(self, tabla, ventana):
         item_sel = tabla.selection()
         if not item_sel: return messagebox.showwarning("Selección", "Seleccione un torneo.")
-        
         id_torneo = int(tabla.item(item_sel[0], "values")[0])
-        ventana.destroy()
 
+        # Desconectar de sala previa si aplica
+        if hasattr(self.controller, 'id_conexion_red') and self.controller.id_conexion_red:
+            if getattr(self, 'torneo_debug_id', None) != id_torneo:
+                self.db.eliminar_conexion_instancia(self.controller.id_conexion_red)
+                self.controller.id_conexion_red = None
+
+        ventana.destroy()
         datos_torneo, inscripciones = self.db.obtener_torneo_completo_debug(id_torneo)
         if not datos_torneo: return
 
@@ -1275,64 +1351,52 @@ class PantallaInscripcion(ttk.Frame):
 
         # 5. --- APLICACIÓN MANUAL DE ESTADO "CONFIRMADO" ---
         self.torneo_debug_id = id_torneo
-        self.torneo_nombre_conf = datos_torneo['nombre']
-        self.torneo_lugar_conf = datos_torneo['lugar']
         self.categoria_confirmada = datos_torneo['categoria']
+        self.oficiales_db = self.db.obtener_oficiales() # Sincronizar nombres
 
-        # Consultar la BD por llaves cerradas antes de configurar la interfaz
-        self.pesos_bloqueados_ids = self.db.obtener_divisiones_bloqueadas(id_torneo)
-
-        # --- NUEVO: Cargar a los descalificados inmediatamente al abrir el torneo ---
-        self.atletas_descalificados_ids = self.db.obtener_peleadores_descalificados(id_torneo)
-
-        # Bloquear Textos
-        self.ent_tor_nombre.config(state="disabled")
-        self.ent_tor_lugar.config(state="disabled")
-        self.cmb_categoria.config(state="disabled")
+        # --- GESTIÓN DE RED SEGURA ---
+        import socket, os
+        nombre_pc = f"{socket.gethostname()}-{os.getpid()}"
+        id_oficial = getattr(self.controller, 'id_operador', None)
         
-        # Bloquear Botón de Edición (No se puede editar un torneo descargado de la BD)
-        self.btn_confirmar_torneo.config(text="Modificar Torneo", state="disabled")
-        self.btn_cancelar_torneo.pack_forget()
-
-        # Activar temporalmente el ingreso de atletas para que el filtro corra bien
-        self.form_frame.config(text="2. Inscripción y Pesaje (Habilitado)")
-        self.cambiar_estado_inscripcion("normal")
-        self.filtrar_atletas_por_edad()
-
-        # 6. --- EVALUACIÓN DE BLOQUEOS DE LLAVE ---
-        all_locked = True
-        if not self.inscripciones_memoria:
-            all_locked = False
-        else:
-            for ins in self.inscripciones_memoria:
-                for div_id in ins['ids_divisiones']:
-                    if div_id not in self.pesos_bloqueados_ids:
-                        all_locked = False
-                        break
-                if not all_locked: break
-
-        if all_locked and self.pesos_bloqueados_ids:
-            # --- BLOQUEO ABSOLUTO ---
-            self.todo_bloqueado = True
-            self.cambiar_estado_inscripcion("disabled")
-            if hasattr(self, 'frame_acciones_memoria'):
-                self.frame_acciones_memoria.pack_forget() # Oculta el contenedor entero
-            messagebox.showinfo("Torneo Cerrado", "Este torneo tiene TODAS sus llaves confirmadas.\nLa fase de inscripción pasa a modo de Solo Lectura.")
-        else:
-            # --- BLOQUEO PARCIAL ---
-            self.todo_bloqueado = False
-            if hasattr(self, 'frame_acciones_memoria'):
-                # Usar 'before' garantiza que vuelva a aparecer a la izquierda del texto
-                self.frame_acciones_memoria.pack(side="left", before=self.lbl_estadisticas)
-                self.btn_editar_memoria.config(state="disabled")
-                self.btn_eliminar_memoria.config(state="disabled")
-            messagebox.showinfo("Cargado", "Torneo cargado en memoria.\nRecuerde que no podrá editar a los atletas cuyas categorías ya tengan una llave confirmada.")
+        # Obtenemos el master actual SIN borrar conexiones todavía para evitar el "robo" de sala
+        master_activo = self.db.verificar_master_activo(id_torneo)
             
-        self.actualizar_btn_nuevo_limpiar()
+        if not master_activo:
+            # Sala vacía: Soy el nuevo Master
+            id_conexion = self.db.registrar_conexion_instancia(id_torneo, id_oficial, nombre_pc, es_master=True)
+            self.controller.id_conexion_red = id_conexion
+            self.controller.es_master = True
+            self.controller.tapiz_asignado = "Tapiz A"
+            
+            # --- NUEVO: ENCENDER BOTONES INFERIORES ---
+            if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="normal")
+            if hasattr(self, 'btn_guardar_torneo'):
+                if not self.btn_guardar_torneo.winfo_ismapped():
+                    self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
+                self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
+                
+        elif master_activo == nombre_pc:
+            # Reconexión
+            m_db = self.db.verificar_master_existente(id_torneo)
+            self.controller.id_conexion_red = m_db['id'] if m_db else None
+            self.controller.es_master = True
+            self.controller.tapiz_asignado = "Tapiz A"
+            
+            # --- NUEVO: ENCENDER BOTONES INFERIORES EN RECONEXIÓN ---
+            if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="normal")
+            if hasattr(self, 'btn_guardar_torneo'):
+                if not self.btn_guardar_torneo.winfo_ismapped():
+                    self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
+                self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
+        else:
+            # Soy Invitado
+            self.controller.es_master = False
+            id_conexion = self.db.registrar_conexion_instancia(id_torneo, id_oficial, nombre_pc, es_master=False)
+            self.controller.id_conexion_red = id_conexion
+            self.comprobar_estado_guest(id_torneo, id_conexion)
 
-        # Revisamos si la BD trajo fecha_fin para saber si está finalizado
-        self.torneo_finalizado = True if datos_torneo.get('fecha_fin') else False
-        self.actualizar_botones_guardado()
+        self.iniciar_escucha_red()
         self.actualizar_tabla_visual()
 
     def refrescar_estado_bloqueos(self):
@@ -1381,3 +1445,490 @@ class PantallaInscripcion(ttk.Frame):
         # 5. Refrescar colores y botones
         self.actualizar_botones_guardado()
         self.actualizar_tabla_visual()
+
+    def guardar_solo_torneo(self):
+        """Decide entre Crear Sala (con validación) o Guardar Cambios."""
+        if not self.inscripciones_memoria:
+            return messagebox.showwarning("Sin Atletas", "Debe inscribir atletas antes de guardar.")
+
+        # 1. Construir diccionario de divisiones correctamente (CORRECCIÓN DE ERROR)
+        divisiones = {}
+        for ins in self.inscripciones_memoria:
+            for i, id_div in enumerate(ins['ids_divisiones']):
+                # Ignorar llaves ya bloqueadas
+                if id_div in getattr(self, "pesos_bloqueados_ids", set()):
+                    continue
+                
+                estilo = ins['estilos'][i]
+                nombre_atl = next((f"{a['apellidos']}, {a['nombre']}" for a in self.atletas_db if a['id'] == ins['id_atleta']), "Atleta")
+            
+                if id_div not in divisiones:
+                    divisiones[id_div] = {"estilo": estilo, "atletas": []}
+                divisiones[id_div]["atletas"].append(nombre_atl)
+
+        id_existente = getattr(self, 'torneo_debug_id', None)
+
+        # A. SI EL TORNEO YA EXISTE (MODO GUARDAR CAMBIOS)
+        if id_existente:
+            if self.db.sincronizar_inscripciones(id_existente, self.inscripciones_memoria):
+                messagebox.showinfo("Éxito", "Cambios sincronizados correctamente.")
+                self.btn_avanzar_pareo.config(state="normal")
+            return
+
+        # B. SI EL TORNEO ES NUEVO (MODO CREAR SALA)
+        # 2. Validar que exista al menos una pareja en alguna categoría/estilo
+        hay_pareja = any(len(d["atletas"]) >= 2 for d in divisiones.values())
+        if not hay_pareja:
+            return messagebox.showerror("Error", "Debe haber al menos 2 atletas en una misma categoría para crear la sala.")
+
+        # 3. Detectar atletas aislados (sin oponente)
+        aislados = []
+        for id_div, info in divisiones.items():
+            if len(info["atletas"]) == 1:
+                aislados.append(f"• {info['atletas'][0]} ({info['estilo']})")
+
+        if aislados:
+            msj_aislados = "Los siguientes atletas no tienen oponente en llaves no confirmadas:\n\n"
+            msj_aislados += "\n".join(aislados[:15])
+            if len(aislados) > 15: msj_aislados += f"\n... y {len(aislados)-15} más."
+            msj_aislados += "\n\n¿Desea continuar con la creación de la sala?"
+            if not messagebox.askyesno("Atletas Aislados", msj_aislados):
+                return
+
+        # 4. Proceder a crear el torneo en BD
+        id_cat = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
+        id_ciu = self.map_ciudades_torneo.get(self.torneo_ciudad_conf, None)
+        
+        datos_torneo = {
+            'nombre': self.ent_tor_nombre.get().strip(),
+            'id_categoria': id_cat,
+            'lugar': self.ent_tor_lugar.get().strip(),
+            'id_ciudad': id_ciu,
+            'fecha': self.ent_tor_fecha.get()
+        }
+        
+        id_torneo = self.db.guardar_torneo_completo(datos_torneo, self.inscripciones_memoria)
+        if not id_torneo:
+            return messagebox.showerror("Error", "Fallo al conectar con la base de datos para crear el torneo.")
+        
+        self.torneo_debug_id = id_torneo
+
+        # 5. ASIGNACIÓN AUTOMÁTICA DE MÁSTER
+        import socket
+        import os # Importamos os para obtener el ID del proceso
+        # Le añadimos el PID al nombre para poder abrir varias ventanas en la misma PC y que se vean diferentes
+        nombre_pc = f"{socket.gethostname()}-{os.getpid()}"
+        id_oficial = getattr(self.controller, 'id_operador', None) or (self.oficiales_db[0]['id'] if getattr(self, 'oficiales_db', None) else 1)
+            
+        id_conexion = self.db.registrar_conexion_instancia(id_torneo, id_oficial, nombre_pc, es_master=True)
+        
+        if id_conexion:
+            self.controller.id_conexion_red = id_conexion
+            self.controller.es_master = True
+            self.controller.tapiz_asignado = "Tapiz A"
+            
+            # --- NUEVO: Buscar y colocar el nombre del árbitro ---
+            id_oficial = getattr(self.controller, 'id_operador', None)
+            oficial = next((o for o in self.oficiales_db if o['id'] == id_oficial), None)
+            nombre_oficial = f"{oficial['nombre']} {oficial['apellidos']}" if oficial else "Desconocido"
+            
+            self.lbl_tapete_master.config(text=f"🥇 Tapiz A (Máster: {nombre_oficial}) - {nombre_pc}", foreground="#28a745")
+            
+            self.btn_guardar_torneo.config(text="💾 Guardar Cambios")
+
+            self.btn_avanzar_pareo.config(state="normal")
+            
+            messagebox.showinfo("Sala Creada", f"¡Éxito! Torneo creado.\n\nEres el MASTER desde '{nombre_pc}'.")
+
+            # ---> NUEVO: ENCENDER EL RADAR DE RED <---
+            self.iniciar_escucha_red()
+        else:
+            messagebox.showerror("Error de Red", "El torneo se guardó, pero falló la creación de la sala.")
+
+    def avanzar_fase_dos(self):
+        """Sincroniza y decide qué lógica de red aplicar al abrir la Cartelera."""
+        if not getattr(self, 'torneo_debug_id', None):
+            return messagebox.showwarning("Acceso Denegado", "Debes GUARDAR EL TORNEO en la BD primero.")
+        
+        if not self.inscripciones_memoria:
+            return messagebox.showwarning("Sin Atletas", "Inscribe al menos un atleta antes de generar llaves.")
+
+        # Sincroniza cualquier atleta nuevo antes de salir
+        if not self.db.sincronizar_inscripciones(self.torneo_debug_id, self.inscripciones_memoria):
+            return messagebox.showerror("Error", "Fallo al guardar los atletas en la base de datos.")
+
+        from pantalla_pareo import PantallaPareo
+        p_pareo = self.controller.pantallas.get(PantallaPareo)
+        
+        if p_pareo:
+            # ---> CORRECCIÓN: SIEMPRE cargamos el torneo para que se dibujen las pestañas
+            p_pareo.cargar_torneo(self.torneo_debug_id)
+            
+            # ---> LUEGO, si estamos en red, iniciamos su motor y encendemos su radar
+            if hasattr(self.controller, 'id_conexion_red') and self.controller.id_conexion_red:
+                p_pareo.iniciar_torneo_red(
+                    self.controller.id_conexion_red, 
+                    self.controller.es_master, 
+                    self.controller.tapiz_asignado
+                )
+                
+            self.controller.mostrar_pantalla(PantallaPareo)
+
+    def iniciar_torneo_red(self, id_conexion, es_master, tapiz):
+        self.id_conexion_red = id_conexion
+        self.es_master = es_master
+        self.tapiz_asignado = tapiz
+        
+        # ---> NUEVO: ENCENDER EL MOTOR DE RED <---
+        self.escuchando_red = True
+
+        inscripciones = self.db.obtener_inscripciones_pareo(self.id_torneo)
+
+    # ================= LÓGICA DE GESTIÓN DE RED Y TAPICES =================
+    def confirmar_arbitro_red(self):
+        item_sel = self.tabla_red.selection()
+        if not item_sel: return messagebox.showwarning("Selección", "Seleccione un árbitro pendiente de la tabla.")
+        
+        # PROTECCIÓN: Evitar auto-confirmar al Máster
+        tags = self.tabla_red.item(item_sel[0], "tags")
+        if "yo_mismo" in tags and getattr(self.controller, 'es_master', False):
+            return messagebox.showwarning("Aviso", "No puedes confirmarte a ti mismo, ya eres el administrador de la sala.")
+            
+        self.tabla_red.item(item_sel[0], tags=("confirmado",))
+        self.actualizar_letras_tapices()
+        self.sincronizar_tapices_db()
+
+    def eliminar_arbitro_red(self):
+        item_sel = self.tabla_red.selection()
+        if not item_sel: return messagebox.showwarning("Selección", "Seleccione un árbitro de la tabla.")
+        
+        id_conexion = self.tabla_red.item(item_sel[0], "values")[0]
+        
+        # PROTECCIÓN: Evitar auto-eliminación
+        if str(id_conexion) == str(self.controller.id_conexion_red):
+            return messagebox.showwarning("Aviso", "No puedes eliminarte a ti mismo.\n\nSi deseas abandonar la sala, utiliza el botón de Cerrar Sesión o Cede el Máster.")
+            
+        if messagebox.askyesno("Confirmar", "¿Desea desconectar y eliminar a este árbitro de la sala?"):
+            self.db.eliminar_conexion_instancia(id_conexion) 
+            if getattr(self, 'torneo_debug_id', None):
+                self.refrescar_tabla_red_master(self.torneo_debug_id)
+
+    def intercambiar_tapiz(self):
+        """Cruza los tapices asignados de los dos árbitros seleccionados."""
+        seleccionados = self.tabla_red.selection()
+        if len(seleccionados) != 2:
+            return messagebox.showwarning("Aviso", "Seleccione exactamente dos árbitros confirmados para intercambiar.")
+            
+        # Extraemos los datos del Árbitro 1
+        id1 = self.tabla_red.item(seleccionados[0], "values")[0]
+        tapiz1 = self.tabla_red.item(seleccionados[0], "values")[3]
+        
+        # Extraemos los datos del Árbitro 2
+        id2 = self.tabla_red.item(seleccionados[1], "values")[0]
+        tapiz2 = self.tabla_red.item(seleccionados[1], "values")[3]
+        
+        # Hacemos el cruce directo en la Base de Datos
+        if hasattr(self.db, 'asignar_tapiz_a_cliente'):
+            self.db.asignar_tapiz_a_cliente(id1, tapiz2)
+            self.db.asignar_tapiz_a_cliente(id2, tapiz1)
+            
+        # Si uno de los involucrados es el Máster, actualizamos su variable interna
+        mi_id = str(self.controller.id_conexion_red)
+        if str(id1) == mi_id:
+            self.controller.tapiz_asignado = tapiz2
+        elif str(id2) == mi_id:
+            self.controller.tapiz_asignado = tapiz1
+            
+        # Forzamos refresco visual instantáneo
+        self.refrescar_tabla_red_master(self.torneo_debug_id)
+
+    # --- NUEVA FUNCIÓN A AGREGAR ---
+    def sincronizar_tapices_db(self):
+        for item in self.tabla_red.get_children():
+            valores = self.tabla_red.item(item, "values")
+            tags = self.tabla_red.item(item, "tags")
+            
+            es_master_local = ("yo_mismo" in tags and getattr(self.controller, 'es_master', False))
+            if "confirmado" in tags or es_master_local:
+                self.db.asignar_tapiz_a_cliente(valores[0], valores[3])
+
+    def actualizar_letras_tapices(self):
+        """Asigna las letras (Tapiz A, B, C) por orden de lista, incluyendo al Máster."""
+        items = self.tabla_red.get_children()
+        ascii_letra = 65 # Empezamos en la letra 'A'
+        
+        for item in items:
+            valores_actuales = list(self.tabla_red.item(item, "values"))
+            tags_actuales = self.tabla_red.item(item, "tags")
+            
+            # El Máster siempre cuenta como confirmado para la letra
+            es_master_local = ("yo_mismo" in tags_actuales and getattr(self.controller, 'es_master', False))
+            
+            if "confirmado" in tags_actuales or es_master_local:
+                valores_actuales[3] = f"Tapiz {chr(ascii_letra)}"
+                ascii_letra += 1
+                
+                # Si es mi fila de Máster, actualizo mi variable interna para que mi computadora lo sepa
+                if es_master_local:
+                    self.controller.tapiz_asignado = valores_actuales[3]
+            else:
+                valores_actuales[3] = "Pendiente"
+                
+            self.tabla_red.item(item, values=valores_actuales)
+
+    def confirmar_arbitro_red(self):
+        item_sel = self.tabla_red.selection()
+        if not item_sel: return messagebox.showwarning("Selección", "Seleccione un árbitro pendiente de la tabla.")
+        
+        # PROTECCIÓN: Evitar auto-confirmar al Máster
+        tags = self.tabla_red.item(item_sel[0], "tags")
+        if "yo_mismo" in tags and getattr(self.controller, 'es_master', False):
+            return messagebox.showwarning("Aviso", "No puedes confirmarte a ti mismo, ya eres el administrador de la sala.")
+            
+        self.tabla_red.item(item_sel[0], tags=("confirmado",))
+        self.actualizar_letras_tapices()
+        self.sincronizar_tapices_db()
+
+    def eliminar_arbitro_red(self):
+        item_sel = self.tabla_red.selection()
+        if not item_sel: return messagebox.showwarning("Selección", "Seleccione un árbitro de la tabla.")
+        
+        id_conexion = self.tabla_red.item(item_sel[0], "values")[0]
+        
+        # PROTECCIÓN: Evitar auto-eliminación
+        if str(id_conexion) == str(self.controller.id_conexion_red):
+            return messagebox.showwarning("Aviso", "No puedes eliminarte a ti mismo.\n\nSi deseas abandonar la sala, utiliza el botón de Cerrar Sesión o Cede el Máster.")
+            
+        if messagebox.askyesno("Confirmar", "¿Desea desconectar y eliminar a este árbitro de la sala?"):
+            self.db.eliminar_conexion_instancia(id_conexion) 
+            if getattr(self, 'torneo_debug_id', None):
+                self.refrescar_tabla_red_master(self.torneo_debug_id)
+
+    def actualizar_letras_tapices(self):
+        """Asigna las letras (Tapiz A, B, C) por orden de lista, incluyendo al Máster."""
+        items = self.tabla_red.get_children()
+        ascii_letra = 65 # Empezamos en la letra 'A'
+        
+        for item in items:
+            valores_actuales = list(self.tabla_red.item(item, "values"))
+            tags_actuales = self.tabla_red.item(item, "tags")
+            
+            # El Máster siempre cuenta como confirmado para la letra
+            es_master_local = ("yo_mismo" in tags_actuales and getattr(self.controller, 'es_master', False))
+            
+            if "confirmado" in tags_actuales or es_master_local:
+                valores_actuales[3] = f"Tapiz {chr(ascii_letra)}"
+                ascii_letra += 1
+                
+                # Si es mi fila de Máster, actualizo mi variable interna para que mi computadora lo sepa
+                if es_master_local:
+                    self.controller.tapiz_asignado = valores_actuales[3]
+            else:
+                valores_actuales[3] = "Pendiente"
+                
+            self.tabla_red.item(item, values=valores_actuales)
+
+    def sincronizar_tapices_db(self):
+        for item in self.tabla_red.get_children():
+            valores = self.tabla_red.item(item, "values")
+            tags = self.tabla_red.item(item, "tags")
+            
+            es_master_local = ("yo_mismo" in tags and getattr(self.controller, 'es_master', False))
+            if "confirmado" in tags or es_master_local:
+                self.db.asignar_tapiz_a_cliente(valores[0], valores[3])
+
+    def ceder_master(self):
+        """Transfiere los poderes de administrador a otro árbitro."""
+        item_sel = self.tabla_red.selection()
+        if not item_sel: return messagebox.showwarning("Selección", "Seleccione al árbitro al que desea transferir el mando.")
+        
+        id_conexion_sel = self.tabla_red.item(item_sel[0], "values")[0]
+        nombre_sel = self.tabla_red.item(item_sel[0], "values")[1].replace("⭐ ", "") 
+        
+        if str(id_conexion_sel) == str(self.controller.id_conexion_red):
+            return messagebox.showwarning("Aviso", "No puedes cederte el control a ti mismo.")
+            
+        tags = self.tabla_red.item(item_sel[0], "tags")
+        if "pendiente" in tags:
+            return messagebox.showwarning("Aviso", "El árbitro debe estar confirmado en la red antes de poder cederle el control.")
+
+        mensaje = f"Está a punto de CEDER EL CONTROL de la sala a:\n\n{nombre_sel}\n\nSi cede el Máster, usted pasará a ser un invitado y perderá los privilegios.\nSólo podrá recuperar el control si el nuevo Máster se lo devuelve o se desconecta.\n\n¿Desea continuar?"
+        
+        if messagebox.askyesno("Ceder Máster", mensaje):
+            if hasattr(self.db, 'transferir_master'):
+                exito = self.db.transferir_master(self.torneo_debug_id, id_conexion_sel)
+                if exito:
+                    # 1. Degradación de rol
+                    self.controller.es_master = False
+                    
+                    # 2. ---> NUEVO: Deseleccionar todo para limpiar la interfaz
+                    self.tabla_red.selection_remove(self.tabla_red.selection())
+                    
+                    # 3. ---> NUEVO: Llamar al cerebro para que aplique el Escudo de Invitado
+                    self.gestionar_estado_botones_red()
+                    
+                    # 4. Bloquear botón de Guardar general
+                    if hasattr(self, 'btn_guardar_torneo'):
+                        self.btn_guardar_torneo.config(state="disabled", text="🔒 Solo el Máster puede guardar")
+                    
+                    messagebox.showinfo("Control Cedido", "Has cedido el control. Ahora eres un invitado en la sala.")
+                    
+                    # 5. Entrar en modo Invitado
+                    self.comprobar_estado_guest(self.torneo_debug_id, self.controller.id_conexion_red)
+            else:
+                messagebox.showerror("Error", "La función no está implementada en la base de datos.")
+
+    # ================= RADAR DE RED (AUTO-REFRESCO) =================
+    def iniciar_escucha_red(self):
+        """Inicia el bucle que consulta la BD cada 3 segundos."""
+        if not hasattr(self, 'escuchando_red') or not self.escuchando_red:
+            self.escuchando_red = True
+            self.ciclo_escucha_red()
+
+    def ciclo_escucha_red(self):
+        if not getattr(self, "escuchando_red", False): return
+        
+        id_torneo = getattr(self, 'torneo_debug_id', None)
+        id_mi_conexion = getattr(self.controller, 'id_conexion_red', None)
+        if not id_torneo or not id_mi_conexion: return
+
+        # 1. COMPROBAR MI PROPIA EXISTENCIA EN LA BD
+        mi_estado = self.db.verificar_estado_mi_conexion(id_mi_conexion)
+        if not mi_estado:
+            self.escuchando_red = False
+            self.controller.id_conexion_red = None
+            self.controller.es_master = False
+            messagebox.showwarning("Desconectado", "Has sido desconectado de la sala.")
+            self.resetear_torneo(forzar=True)
+            return
+
+        # ---> NUEVO: ENVIAR LATIDO DE VIDA <---
+        # Esto le dice a la base de datos "¡Sigo aquí!" antes de que pase el limpiador
+        if hasattr(self.db, 'mantener_latido_conexion'):
+            self.db.mantener_latido_conexion(id_mi_conexion)
+
+        is_master_db = mi_estado.get('es_master', False)
+        was_master_local = getattr(self.controller, 'es_master', False)
+
+        # 2. TRANSICIONES DE PODER PACÍFICAS
+        if is_master_db and not was_master_local:
+            # --- ASCENSO: Me acaban de ceder el Máster ---
+            self.controller.es_master = True
+            self.controller.tapiz_asignado = mi_estado.get('tapiz_asignado', 'Tapiz A')
+            
+            if hasattr(self, 'btn_guardar_torneo'):
+                self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
+            
+            messagebox.showinfo("Control de Sala", "¡Has recibido los privilegios de Máster!")
+
+        elif not is_master_db and was_master_local:
+            # --- DESCENSO: Acabo de ceder el Máster a otro ---
+            self.controller.es_master = False
+            
+            # Limpiar selección y aplicar escudo de botones
+            if hasattr(self, 'tabla_red') and self.tabla_red.selection():
+                self.tabla_red.selection_remove(self.tabla_red.selection())
+            self.gestionar_estado_botones_red() 
+            
+            if hasattr(self, 'btn_guardar_torneo'):
+                self.btn_guardar_torneo.config(state="disabled", text="🔒 Solo el Máster puede guardar")
+
+        # 3. HERENCIA POR DESCONEXIÓN ABRUPTA (Crasheo)
+        if not is_master_db:
+            # Si soy invitado, vigilo que la sala no se quede sin líder
+            master_activo = self.db.verificar_master_activo(id_torneo)
+            if not master_activo:
+                if hasattr(self.db, 'heredar_master'):
+                    heredado = self.db.heredar_master(id_torneo, id_mi_conexion)
+                    if heredado:
+                        messagebox.showwarning("Máster Caído", "El Máster anterior se desconectó.\nHas heredado automáticamente el control de la sala.")
+                        # En el siguiente ciclo (2 seg), el bloque de ASCENSO se activará automáticamente
+
+        # 4. ACTUALIZAR VISUALES Y LIMPIAR FANTASMAS
+        if self.controller.es_master:
+            # --- NUEVO: El Máster limpia las conexiones caídas antes de dibujar la tabla ---
+            if hasattr(self.db, 'limpiar_conexiones_muertas'):
+                self.db.limpiar_conexiones_muertas(id_torneo)
+                
+            self.refrescar_tabla_red_master(id_torneo)
+        else:
+            self.comprobar_estado_guest(id_torneo, id_mi_conexion)
+
+        # 5. REPETIR BUCLE
+        self.after(2000, self.ciclo_escucha_red)
+
+    def refrescar_tabla_red_master(self, id_torneo):
+        """Actualiza la lista para el Admin, preservando selecciones múltiples."""
+        
+        # --- NUEVO: FIJAR SIEMPRE LA ETIQUETA VERDE DEL MÁSTER ---
+        id_oficial = getattr(self.controller, 'id_operador', None)
+        oficial = next((o for o in self.oficiales_db if o['id'] == id_oficial), None)
+        nom_ofi = f"{oficial['nombre']} {oficial['apellidos']}" if oficial else "Desconocido"
+        mi_tapiz = getattr(self.controller, 'tapiz_asignado', 'Tapiz A')
+        self.lbl_tapete_master.config(text=f"🥇 {mi_tapiz} (Máster: {nom_ofi})", foreground="#28a745")
+
+        # 1. Guardar TODAS las selecciones actuales...
+        ids_seleccionados = [str(self.tabla_red.item(i, "values")[0]) for i in self.tabla_red.selection()]
+
+        conexiones = self.db.obtener_conexiones_torneo(id_torneo)
+        for item in self.tabla_red.get_children(): 
+            self.tabla_red.delete(item)
+
+        if not conexiones: 
+            self.gestionar_estado_botones_red()
+            return
+
+        for c in conexiones:
+            es_master = c.get('es_master', False)
+            mi_id = getattr(self.controller, 'id_conexion_red', None)
+            
+            tag = "yo_mismo" if str(c['id_conexion']) == str(mi_id) else ("confirmado" if c['estado_conexion'] == 'Aprobado' else "pendiente")
+            nombre_visual = f"⭐ {c['nombre']} {c['apellidos']}" if es_master else f"{c['nombre']} {c['apellidos']}"
+            tapiz_visual = c['tapiz_asignado'] or "N.A."
+            
+            valores = (c['id_conexion'], nombre_visual, c['nombre_dispositivo'], tapiz_visual, c['estado_conexion'])
+            new_item = self.tabla_red.insert("", "end", values=valores, tags=(tag,))
+            
+            # 2. Restaurar selección múltiple
+            if str(c['id_conexion']) in ids_seleccionados:
+                self.tabla_red.selection_add(new_item)
+                
+        # 3. Re-evaluar los botones de seguridad tras refrescar
+        self.gestionar_estado_botones_red()
+
+    def comprobar_estado_guest(self, id_torneo, id_mi_conexion):
+        """El Guest verifica su estado y actualiza la UI e invitados al instante."""
+        estado_bd = self.db.verificar_estado_mi_conexion(id_mi_conexion)
+        
+        if not estado_bd: return # Seguridad por si se borra la conexión
+
+        estado_conexion = estado_bd['estado_conexion']
+        tapiz = estado_bd['tapiz_asignado']
+        self.controller.tapiz_asignado = tapiz
+
+        # Obtener a todos los presentes en la sala
+        conexiones = self.db.obtener_conexiones_torneo(id_torneo)
+        master_nombre = "Desconocido"
+
+        for item in self.tabla_red.get_children(): self.tabla_red.delete(item)
+
+        for c in conexiones:
+            es_master = c.get('es_master', False)
+            if es_master: master_nombre = f"{c['nombre']} {c['apellidos']}"
+            
+            es_yo = (str(c['id_conexion']) == str(id_mi_conexion))
+            tag = "yo_mismo" if es_yo else ("confirmado" if c['estado_conexion'] == 'Aprobado' else "pendiente")
+            
+            nombre_visual = f"⭐ {c['nombre']} {c['apellidos']}" if es_master else f"{c['nombre']} {c['apellidos']}"
+            tapiz_visual = c['tapiz_asignado'] or "N.A."
+            
+            self.tabla_red.insert("", "end", values=(c['id_conexion'], nombre_visual, c['nombre_dispositivo'], tapiz_visual, c['estado_conexion']), tags=(tag,))
+
+        # Actualización de etiqueta basada en la realidad de la BD
+        if estado_conexion == 'Aprobado':
+            self.lbl_tapete_master.config(text=f"✅ {tapiz} (Máster: {master_nombre})", foreground="#17a2b8")
+            if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="normal")
+        else:
+            # Solo si no está aprobado, mostramos "Esperando"
+            self.lbl_tapete_master.config(text=f"⏳ Esperando aprobación (Máster: {master_nombre})", foreground="#fd7e14")
+            if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="disabled")
