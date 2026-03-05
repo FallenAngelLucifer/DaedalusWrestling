@@ -330,6 +330,45 @@ class PantallaInscripcion(ttk.Frame):
         self.cambiar_estado_inscripcion("disabled")
         self.actualizar_botones_guardado()
 
+        self.actualizar_btn_nuevo_limpiar()
+
+    def bloquear_datos_torneo(self, es_guest):
+        """Bloquea o desbloquea el panel izquierdo y gestiona el botón Modificar Torneo."""
+        estado_normal = "disabled" if es_guest else "normal"
+        estado_combo = "disabled" if es_guest else "readonly"
+
+        controles = [
+            (getattr(self, 'ent_tor_nombre', None), estado_normal),
+            (getattr(self, 'cmb_categoria', None), estado_combo),
+            (getattr(self, 'ent_tor_lugar', None), estado_normal),
+            (getattr(self, 'cmb_tor_ciudad', None), estado_combo),
+            (getattr(self, 'cmb_tor_tapices', None), estado_combo),
+            (getattr(self, 'ent_fecha_inicio', None), estado_normal),
+            (getattr(self, 'ent_fecha_fin', None), estado_normal),
+            (getattr(self, 'chk_libre', None), estado_normal),
+            (getattr(self, 'chk_greco', None), estado_normal),
+            (getattr(self, 'chk_femenina', None), estado_normal)
+        ]
+        
+        for widget, est in controles:
+            if widget: 
+                widget.config(state=est)
+
+        # --- NUEVO: Mostrar botón para todos, pero bloqueado para invitados ---
+        if es_guest:
+            if hasattr(self, 'btn_confirmar_torneo'):
+                if not self.btn_confirmar_torneo.winfo_ismapped():
+                    self.btn_confirmar_torneo.pack(side="left", padx=5, before=self.btn_nuevo_limpiar)
+                self.btn_confirmar_torneo.config(state="disabled", text="Modificar Torneo")
+            if hasattr(self, 'btn_cancelar_torneo'): 
+                self.btn_cancelar_torneo.pack_forget()
+        else:
+            if hasattr(self, 'btn_confirmar_torneo'):
+                if not self.btn_confirmar_torneo.winfo_ismapped():
+                    self.btn_confirmar_torneo.pack(side="left", padx=5, before=self.btn_nuevo_limpiar)
+                # El Máster recupera su estado normal
+                self.btn_confirmar_torneo.config(state="normal")
+
     def gestionar_estado_botones_red(self, event=None):
         """Activa o desactiva los botones de red según las reglas exactas de selección y el rol."""
         
@@ -391,29 +430,54 @@ class PantallaInscripcion(ttk.Frame):
         if hasattr(self, 'btn_ceder_master'): self.btn_ceder_master.config(state=est_ceder)
 
     def actualizar_botones_guardado(self):
-        """Evalúa las reglas visuales de los botones de subida/progreso."""
-        if not hasattr(self, 'btn_subir_bd') or not hasattr(self, 'btn_guardar_progreso'): return
+        """Evalúa las reglas visuales de los botones inferiores y de edición."""
+        if not hasattr(self, 'btn_guardar_torneo'): return
 
         is_finalizado = getattr(self, "torneo_finalizado", False)
         is_todo_bloqueado = getattr(self, "todo_bloqueado", False)
         has_id = getattr(self, "torneo_debug_id", None) is not None
+        es_master = getattr(self.controller, 'es_master', False)
 
-        # 1. Torneo terminado o todas las llaves cerradas
+        # 1. SI EL TORNEO ESTÁ CERRADO O TODAS LAS LLAVES CONFIRMADAS
         if is_finalizado or is_todo_bloqueado:
-            self.btn_guardar_progreso.pack_forget()
-            self.btn_subir_bd.config(text="Continuar a Fase de Pareo")
-        
-        # 2. Torneo ya existe en la BD (Modo Edición)
-        elif has_id:
-            if not self.btn_guardar_progreso.winfo_ismapped():
-                self.btn_guardar_progreso.pack(side="right", padx=10)
-            self.btn_subir_bd.config(text="Confirmar y Guardar")
-            
-        # 3. Torneo Nuevo
+            self.btn_guardar_torneo.pack_forget() 
+            if hasattr(self, 'frame_acciones_memoria'):
+                self.frame_acciones_memoria.pack_forget() 
+            if hasattr(self, 'btn_avanzar_pareo'):
+                self.btn_avanzar_pareo.config(state="normal")
+            return
+
+        # 2. SI EL TORNEO ESTÁ ACTIVO
+        if hasattr(self, 'frame_acciones_memoria') and not self.frame_acciones_memoria.winfo_ismapped():
+            self.frame_acciones_memoria.pack(side="left", before=self.lbl_estadisticas)
+
+        if has_id:
+            if not self.btn_guardar_torneo.winfo_ismapped():
+                self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
+                
+            if es_master:
+                self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
+                estado_pareo = "normal" # El Máster siempre puede avanzar
+            else:
+                texto_lbl = self.lbl_tapete_master.cget("text")
+                estado = "normal" if "✅" in texto_lbl else "disabled"
+                self.btn_guardar_torneo.config(state=estado, text="☁️ Sincronizar Atletas")
+                estado_pareo = estado # --- CORRECCIÓN: El Guest solo avanza si está aprobado ---
+                
+            if hasattr(self, 'btn_avanzar_pareo'):
+                self.btn_avanzar_pareo.config(state=estado_pareo)
+                
         else:
-            if not self.btn_guardar_progreso.winfo_ismapped():
-                self.btn_guardar_progreso.pack(side="right", padx=10)
-            self.btn_subir_bd.config(text="Confirmar y Subir a Base de Datos")
+            if not self.btn_guardar_torneo.winfo_ismapped():
+                self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
+                
+            if getattr(self, 'categoria_confirmada', None):
+                self.btn_guardar_torneo.config(state="normal", text="✅ Confirmar y Crear Sala")
+            else:
+                self.btn_guardar_torneo.config(state="disabled", text="✅ Confirmar y Crear Sala")
+                
+            if hasattr(self, 'btn_avanzar_pareo'):
+                self.btn_avanzar_pareo.config(state="disabled")
 
     def limpiar_buscador(self, entry, listbox, lista_completa):
         """Borra el texto del buscador y restaura la lista visual original."""
@@ -499,24 +563,16 @@ class PantallaInscripcion(ttk.Frame):
             self.cargar_para_editar()
 
     def actualizar_btn_nuevo_limpiar(self):
-        """Evalúa el estado del formulario para mostrar, ocultar o cambiar el botón inteligente."""
-        # 1. Si hay un torneo cargado de la BD
+        """Mantiene el botón siempre visible y con el texto correcto."""
+        if not self.btn_nuevo_limpiar.winfo_ismapped():
+            self.btn_nuevo_limpiar.pack(side="left", padx=5)
+
         if getattr(self, "torneo_debug_id", None) is not None:
-            self.btn_nuevo_limpiar.config(text="Nuevo Torneo")
-            self.btn_nuevo_limpiar.pack(side="left", padx=5)
-            return
-            
-        # 2. Si es personalizado pero tiene datos escritos o confirmados
-        nombre = self.ent_tor_nombre.get().strip()
-        lugar = self.ent_tor_lugar.get().strip()
-        cat = self.cmb_categoria.get()
-        
-        if nombre or lugar or cat or self.categoria_confirmada:
+            self.btn_nuevo_limpiar.config(text="Salir / Nuevo Torneo")
+        elif self.ent_tor_nombre.get().strip() or self.categoria_confirmada:
             self.btn_nuevo_limpiar.config(text="Limpiar Torneo")
-            self.btn_nuevo_limpiar.pack(side="left", padx=5)
         else:
-            # 3. Está completamente vacío
-            self.btn_nuevo_limpiar.pack_forget()
+            self.btn_nuevo_limpiar.config(text="Nuevo Torneo")
 
     def resetear_torneo(self, forzar=False):
         """Borra la memoria y resetea la pantalla a su estado inicial de fábrica."""
@@ -537,8 +593,9 @@ class PantallaInscripcion(ttk.Frame):
         self.categoria_confirmada = None
         self.torneo_nombre_conf = ""
         self.torneo_lugar_conf = ""
-        self.torneo_ciudad_conf = "" # <-- NUEVO
+        self.torneo_ciudad_conf = ""
         self.todo_bloqueado = False
+        self.bloquear_seleccion_tabla = False # <--- NUEVA LÍNEA AÑADIDA
         self.pesos_bloqueados_ids = set()
 
         # 2. Resetear Campos de Texto
@@ -636,8 +693,8 @@ class PantallaInscripcion(ttk.Frame):
         self.actualizar_botones_guardado()
 
     def al_seleccionar_tabla(self, event):
-        # Si el torneo entero está cerrado, no dejamos seleccionar nada
-        if getattr(self, "todo_bloqueado", False):
+        # --- NUEVO: Bloqueo total si el torneo cerró o si es un Invitado Pendiente ---
+        if getattr(self, "todo_bloqueado", False) or getattr(self, "bloquear_seleccion_tabla", False):
             if self.tabla.selection():
                 self.tabla.selection_remove(self.tabla.selection()[0])
             return
@@ -954,8 +1011,19 @@ class PantallaInscripcion(ttk.Frame):
         nombre_atleta = valores[2]
         id_atleta = int(valores[0])
         
-        respuesta = messagebox.askyesno("Confirmar Eliminación", f"¿Seguro que desea eliminar a '{nombre_atleta}' de las inscripciones?")
-        if not respuesta: return
+        # --- NUEVO: FILTRO DE SEGURIDAD PARA INVITADOS ---
+        if not getattr(self.controller, 'es_master', False):
+            advertencia = (
+                "⚠️ ADVERTENCIA DE SEGURIDAD\n\n"
+                f"Eres INVITADO. Eliminar a '{nombre_atleta}' lo borrará para toda la sala si sincronizas.\n"
+                "Si el Máster ya inició la Fase de Llaves, esto podría ARRUINAR EL TORNEO.\n\n"
+                "¿Estás completamente seguro de eliminarlo?"
+            )
+            if not messagebox.askyesno("Filtro de Invitado", advertencia, icon='warning'):
+                return
+        else:
+            if not messagebox.askyesno("Confirmar Eliminación", f"¿Seguro que desea eliminar a '{nombre_atleta}' de las inscripciones?"): 
+                return
             
         if self.id_atleta_editando == id_atleta: 
             self.cancelar_edicion() 
@@ -1352,52 +1420,64 @@ class PantallaInscripcion(ttk.Frame):
         # 5. --- APLICACIÓN MANUAL DE ESTADO "CONFIRMADO" ---
         self.torneo_debug_id = id_torneo
         self.categoria_confirmada = datos_torneo['categoria']
-        self.oficiales_db = self.db.obtener_oficiales() # Sincronizar nombres
+        self.oficiales_db = self.db.obtener_oficiales()
+
+        # Configuración por defecto: Torneo Confirmado y Listo para Inscribir
+        self.btn_confirmar_torneo.config(text="Modificar Torneo")
+        self.btn_cancelar_torneo.pack_forget()
+        self.form_frame.config(text="2. Inscripción y Pesaje (Habilitado)")
+        self.cambiar_estado_inscripcion("normal")
 
         # --- GESTIÓN DE RED SEGURA ---
         import socket, os
         nombre_pc = f"{socket.gethostname()}-{os.getpid()}"
         id_oficial = getattr(self.controller, 'id_operador', None)
-        
-        # Obtenemos el master actual SIN borrar conexiones todavía para evitar el "robo" de sala
         master_activo = self.db.verificar_master_activo(id_torneo)
             
-        if not master_activo:
-            # Sala vacía: Soy el nuevo Master
-            id_conexion = self.db.registrar_conexion_instancia(id_torneo, id_oficial, nombre_pc, es_master=True)
+        if not master_activo or master_activo == nombre_pc:
+            # Soy MÁSTER
+            if not master_activo:
+                id_conexion = self.db.registrar_conexion_instancia(id_torneo, id_oficial, nombre_pc, es_master=True)
+            else:
+                m_db = self.db.verificar_master_existente(id_torneo)
+                id_conexion = m_db['id'] if m_db else None
+                
             self.controller.id_conexion_red = id_conexion
             self.controller.es_master = True
             self.controller.tapiz_asignado = "Tapiz A"
             
-            # --- NUEVO: ENCENDER BOTONES INFERIORES ---
+            self.bloquear_datos_torneo(False) # Abre permisos de Master (Muestra botón modificar)
+            
+            # Re-aplicar estado readonly a campos para que nazcan bloqueados
+            self.ent_tor_nombre.config(state="disabled")
+            self.ent_tor_lugar.config(state="disabled")
+            self.cmb_categoria.config(state="disabled")
+            if hasattr(self, 'cmb_tor_ciudad'): self.cmb_tor_ciudad.config(state="disabled")
+
             if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="normal")
             if hasattr(self, 'btn_guardar_torneo'):
                 if not self.btn_guardar_torneo.winfo_ismapped():
                     self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
                 self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
                 
-        elif master_activo == nombre_pc:
-            # Reconexión
-            m_db = self.db.verificar_master_existente(id_torneo)
-            self.controller.id_conexion_red = m_db['id'] if m_db else None
-            self.controller.es_master = True
-            self.controller.tapiz_asignado = "Tapiz A"
-            
-            # --- NUEVO: ENCENDER BOTONES INFERIORES EN RECONEXIÓN ---
-            if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="normal")
-            if hasattr(self, 'btn_guardar_torneo'):
-                if not self.btn_guardar_torneo.winfo_ismapped():
-                    self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
-                self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
         else:
-            # Soy Invitado
+            # Soy INVITADO (GUEST)
             self.controller.es_master = False
             id_conexion = self.db.registrar_conexion_instancia(id_torneo, id_oficial, nombre_pc, es_master=False)
             self.controller.id_conexion_red = id_conexion
+            
+            self.bloquear_datos_torneo(True) # Oculta botón modificar y bloquea campos
+            if hasattr(self, 'btn_guardar_torneo'):
+                if not self.btn_guardar_torneo.winfo_ismapped():
+                    self.btn_guardar_torneo.pack(side="left", fill="x", expand=True, padx=(0, 2))
+                # Nace bloqueado, el radar lo activará solo si es Aprobado
+                self.btn_guardar_torneo.config(state="disabled", text="☁️ Sincronizar Atletas")
+                
             self.comprobar_estado_guest(id_torneo, id_conexion)
 
         self.iniciar_escucha_red()
         self.actualizar_tabla_visual()
+        self.refrescar_estado_bloqueos()
 
     def refrescar_estado_bloqueos(self):
         """Consulta la BD y actualiza la interfaz si hubo cambios en la pantalla de Pareo."""
@@ -1447,18 +1527,32 @@ class PantallaInscripcion(ttk.Frame):
         self.actualizar_tabla_visual()
 
     def guardar_solo_torneo(self):
-        """Decide entre Crear Sala (con validación) o Guardar Cambios."""
+        """Decide entre Crear Sala, Guardar Cambios o (si es Guest) Sincronizar Atletas."""
+        if not getattr(self, 'torneo_debug_id', None) and getattr(self.controller, 'es_master', False) == False:
+            return messagebox.showwarning("Aviso", "No hay un torneo activo al que sincronizar.")
+
+        # --- NUEVO: FILTRO PARA INVITADOS (GUEST) ---
+        if not getattr(self.controller, 'es_master', False):
+            if not messagebox.askyesno("Sincronizar Atletas", "⚠️ Eres INVITADO en esta sala.\n\n¿Deseas enviar tus atletas a la base de datos central para que el Máster los incluya en el torneo?"):
+                return
+                
+            exito = self.db.sincronizar_inscripciones(self.torneo_debug_id, self.inscripciones_memoria)
+            if exito:
+                messagebox.showinfo("Éxito", "Atletas sincronizados correctamente con la sala.")
+                self.actualizar_botones_guardado()
+            else:
+                messagebox.showerror("Error", "No se pudieron sincronizar los atletas.")
+            return
+
+        # --- LÓGICA ORIGINAL PARA EL MÁSTER ---
         if not self.inscripciones_memoria:
             return messagebox.showwarning("Sin Atletas", "Debe inscribir atletas antes de guardar.")
 
-        # 1. Construir diccionario de divisiones correctamente (CORRECCIÓN DE ERROR)
         divisiones = {}
         for ins in self.inscripciones_memoria:
             for i, id_div in enumerate(ins['ids_divisiones']):
-                # Ignorar llaves ya bloqueadas
                 if id_div in getattr(self, "pesos_bloqueados_ids", set()):
                     continue
-                
                 estilo = ins['estilos'][i]
                 nombre_atl = next((f"{a['apellidos']}, {a['nombre']}" for a in self.atletas_db if a['id'] == ins['id_atleta']), "Atleta")
             
@@ -1468,20 +1562,16 @@ class PantallaInscripcion(ttk.Frame):
 
         id_existente = getattr(self, 'torneo_debug_id', None)
 
-        # A. SI EL TORNEO YA EXISTE (MODO GUARDAR CAMBIOS)
         if id_existente:
             if self.db.sincronizar_inscripciones(id_existente, self.inscripciones_memoria):
                 messagebox.showinfo("Éxito", "Cambios sincronizados correctamente.")
                 self.btn_avanzar_pareo.config(state="normal")
             return
 
-        # B. SI EL TORNEO ES NUEVO (MODO CREAR SALA)
-        # 2. Validar que exista al menos una pareja en alguna categoría/estilo
         hay_pareja = any(len(d["atletas"]) >= 2 for d in divisiones.values())
         if not hay_pareja:
             return messagebox.showerror("Error", "Debe haber al menos 2 atletas en una misma categoría para crear la sala.")
 
-        # 3. Detectar atletas aislados (sin oponente)
         aislados = []
         for id_div, info in divisiones.items():
             if len(info["atletas"]) == 1:
@@ -1495,7 +1585,6 @@ class PantallaInscripcion(ttk.Frame):
             if not messagebox.askyesno("Atletas Aislados", msj_aislados):
                 return
 
-        # 4. Proceder a crear el torneo en BD
         id_cat = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
         id_ciu = self.map_ciudades_torneo.get(self.torneo_ciudad_conf, None)
         
@@ -1513,10 +1602,8 @@ class PantallaInscripcion(ttk.Frame):
         
         self.torneo_debug_id = id_torneo
 
-        # 5. ASIGNACIÓN AUTOMÁTICA DE MÁSTER
         import socket
-        import os # Importamos os para obtener el ID del proceso
-        # Le añadimos el PID al nombre para poder abrir varias ventanas en la misma PC y que se vean diferentes
+        import os 
         nombre_pc = f"{socket.gethostname()}-{os.getpid()}"
         id_oficial = getattr(self.controller, 'id_operador', None) or (self.oficiales_db[0]['id'] if getattr(self, 'oficiales_db', None) else 1)
             
@@ -1527,20 +1614,17 @@ class PantallaInscripcion(ttk.Frame):
             self.controller.es_master = True
             self.controller.tapiz_asignado = "Tapiz A"
             
-            # --- NUEVO: Buscar y colocar el nombre del árbitro ---
             id_oficial = getattr(self.controller, 'id_operador', None)
             oficial = next((o for o in self.oficiales_db if o['id'] == id_oficial), None)
             nombre_oficial = f"{oficial['nombre']} {oficial['apellidos']}" if oficial else "Desconocido"
             
             self.lbl_tapete_master.config(text=f"🥇 Tapiz A (Máster: {nombre_oficial}) - {nombre_pc}", foreground="#28a745")
             
-            self.btn_guardar_torneo.config(text="💾 Guardar Cambios")
-
+            self.bloquear_datos_torneo(False) # Abre el candado al volverse Máster
+            self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
             self.btn_avanzar_pareo.config(state="normal")
             
             messagebox.showinfo("Sala Creada", f"¡Éxito! Torneo creado.\n\nEres el MASTER desde '{nombre_pc}'.")
-
-            # ---> NUEVO: ENCENDER EL RADAR DE RED <---
             self.iniciar_escucha_red()
         else:
             messagebox.showerror("Error de Red", "El torneo se guardó, pero falló la creación de la sala.")
@@ -1761,15 +1845,16 @@ class PantallaInscripcion(ttk.Frame):
                     # 1. Degradación de rol
                     self.controller.es_master = False
                     
-                    # 2. ---> NUEVO: Deseleccionar todo para limpiar la interfaz
+                    # 2. Deseleccionar todo para limpiar la interfaz
                     self.tabla_red.selection_remove(self.tabla_red.selection())
                     
-                    # 3. ---> NUEVO: Llamar al cerebro para que aplique el Escudo de Invitado
+                    # 3. Llamar al cerebro para que aplique el Escudo de Invitado
                     self.gestionar_estado_botones_red()
                     
-                    # 4. Bloquear botón de Guardar general
+                    # 4. --- NUEVO: Activar Escudo de Torneo y Botón Sincronizar ---
+                    self.bloquear_datos_torneo(True)
                     if hasattr(self, 'btn_guardar_torneo'):
-                        self.btn_guardar_torneo.config(state="disabled", text="🔒 Solo el Máster puede guardar")
+                        self.btn_guardar_torneo.config(state="normal", text="☁️ Sincronizar Atletas")
                     
                     messagebox.showinfo("Control Cedido", "Has cedido el control. Ahora eres un invitado en la sala.")
                     
@@ -1792,7 +1877,6 @@ class PantallaInscripcion(ttk.Frame):
         id_mi_conexion = getattr(self.controller, 'id_conexion_red', None)
         if not id_torneo or not id_mi_conexion: return
 
-        # 1. COMPROBAR MI PROPIA EXISTENCIA EN LA BD
         mi_estado = self.db.verificar_estado_mi_conexion(id_mi_conexion)
         if not mi_estado:
             self.escuchando_red = False
@@ -1802,8 +1886,6 @@ class PantallaInscripcion(ttk.Frame):
             self.resetear_torneo(forzar=True)
             return
 
-        # ---> NUEVO: ENVIAR LATIDO DE VIDA <---
-        # Esto le dice a la base de datos "¡Sigo aquí!" antes de que pase el limpiador
         if hasattr(self.db, 'mantener_latido_conexion'):
             self.db.mantener_latido_conexion(id_mi_conexion)
 
@@ -1812,9 +1894,17 @@ class PantallaInscripcion(ttk.Frame):
 
         # 2. TRANSICIONES DE PODER PACÍFICAS
         if is_master_db and not was_master_local:
-            # --- ASCENSO: Me acaban de ceder el Máster ---
+            # --- ASCENSO ---
             self.controller.es_master = True
             self.controller.tapiz_asignado = mi_estado.get('tapiz_asignado', 'Tapiz A')
+            
+            self.bloquear_datos_torneo(False) # Muestra botón Modificar
+            
+            # --- CORRECCIÓN: Inicia bloqueado, requiere clic en "Modificar" ---
+            self.ent_tor_nombre.config(state="disabled")
+            self.ent_tor_lugar.config(state="disabled")
+            self.cmb_categoria.config(state="disabled")
+            if hasattr(self, 'cmb_tor_ciudad'): self.cmb_tor_ciudad.config(state="disabled")
             
             if hasattr(self, 'btn_guardar_torneo'):
                 self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
@@ -1822,39 +1912,36 @@ class PantallaInscripcion(ttk.Frame):
             messagebox.showinfo("Control de Sala", "¡Has recibido los privilegios de Máster!")
 
         elif not is_master_db and was_master_local:
-            # --- DESCENSO: Acabo de ceder el Máster a otro ---
+            # --- DESCENSO ---
             self.controller.es_master = False
             
-            # Limpiar selección y aplicar escudo de botones
+            self.bloquear_datos_torneo(True) # Activa el escudo
             if hasattr(self, 'tabla_red') and self.tabla_red.selection():
                 self.tabla_red.selection_remove(self.tabla_red.selection())
             self.gestionar_estado_botones_red() 
             
             if hasattr(self, 'btn_guardar_torneo'):
-                self.btn_guardar_torneo.config(state="disabled", text="🔒 Solo el Máster puede guardar")
+                self.btn_guardar_torneo.config(state="normal", text="☁️ Sincronizar Atletas")
 
-        # 3. HERENCIA POR DESCONEXIÓN ABRUPTA (Crasheo)
+        # 3. HERENCIA POR DESCONEXIÓN ABRUPTA
         if not is_master_db:
-            # Si soy invitado, vigilo que la sala no se quede sin líder
             master_activo = self.db.verificar_master_activo(id_torneo)
             if not master_activo:
                 if hasattr(self.db, 'heredar_master'):
                     heredado = self.db.heredar_master(id_torneo, id_mi_conexion)
                     if heredado:
                         messagebox.showwarning("Máster Caído", "El Máster anterior se desconectó.\nHas heredado automáticamente el control de la sala.")
-                        # En el siguiente ciclo (2 seg), el bloque de ASCENSO se activará automáticamente
 
-        # 4. ACTUALIZAR VISUALES Y LIMPIAR FANTASMAS
+        # 4. ACTUALIZAR VISUALES Y BLOQUEOS
+        self.refrescar_estado_bloqueos() # <--- NUEVO: Vigila los candados en vivo
+
         if self.controller.es_master:
-            # --- NUEVO: El Máster limpia las conexiones caídas antes de dibujar la tabla ---
             if hasattr(self.db, 'limpiar_conexiones_muertas'):
                 self.db.limpiar_conexiones_muertas(id_torneo)
-                
             self.refrescar_tabla_red_master(id_torneo)
         else:
             self.comprobar_estado_guest(id_torneo, id_mi_conexion)
 
-        # 5. REPETIR BUCLE
         self.after(2000, self.ciclo_escucha_red)
 
     def refrescar_tabla_red_master(self, id_torneo):
@@ -1928,7 +2015,17 @@ class PantallaInscripcion(ttk.Frame):
         if estado_conexion == 'Aprobado':
             self.lbl_tapete_master.config(text=f"✅ {tapiz} (Máster: {master_nombre})", foreground="#17a2b8")
             if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="normal")
+            
+            # Invitado Aprobado: Puede trabajar
+            if not getattr(self, "todo_bloqueado", False):
+                self.cambiar_estado_inscripcion("normal")
+            self.bloquear_seleccion_tabla = False
         else:
-            # Solo si no está aprobado, mostramos "Esperando"
+            # Invitado Pendiente: Todo congelado
             self.lbl_tapete_master.config(text=f"⏳ Esperando aprobación (Máster: {master_nombre})", foreground="#fd7e14")
             if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="disabled")
+            
+            self.cambiar_estado_inscripcion("disabled")
+            self.bloquear_seleccion_tabla = True
+
+        self.actualizar_botones_guardado()

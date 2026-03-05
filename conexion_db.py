@@ -792,28 +792,6 @@ class ConexionDB:
         res = self._ejecutar_select(query, (id_conexion,))
         return res[0] if res else None
 
-    def verificar_master_activo(self, id_torneo):
-        """Devuelve el nombre del dispositivo del Master actual."""
-        conexion = self.conectar()
-        if not conexion: return None
-        try:
-            with conexion.cursor() as cursor:
-                cursor.execute("""
-                    SELECT nombre_dispositivo 
-                    FROM conexiones_torneo 
-                    WHERE id_torneo = %s AND es_master = TRUE
-                    LIMIT 1
-                """, (id_torneo,))
-                resultado = cursor.fetchone()
-                if resultado:
-                    return resultado['nombre_dispositivo'] if isinstance(resultado, dict) else resultado[0]
-                return None
-        except Exception as e:
-            print(f"Error al verificar master: {e}")
-            return None
-        finally:
-            conexion.close()
-
     def eliminar_conexion_instancia(self, id_conexion):
         """Elimina la conexión, hereda el Máster si es necesario y reorganiza los tapices para no dejar huecos."""
         conexion = self.conectar()
@@ -873,24 +851,74 @@ class ConexionDB:
             conexion.close()
 
     def limpiar_conexiones_muertas(self, id_torneo):
-        """Busca conexiones inactivas por más de 6 segundos y las elimina automáticamente."""
+        """Purga de la sala a cualquier árbitro que no haya enviado latidos en 10 segundos."""
         conexion = self.conectar()
-        if not conexion: return
+        if not conexion: return False
         try:
             with conexion.cursor() as cur:
-                cur.execute("""
-                    SELECT id FROM conexiones_torneo 
-                    WHERE id_torneo = %s AND CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '6 seconds'
-                """, (id_torneo,))
-                muertos = cur.fetchall()
+                # Usamos el nombre correcto de tabla y el intervalo de PostgreSQL
+                cur.execute("DELETE FROM conexiones_torneo WHERE id_torneo = %s AND ultima_actividad < NOW() - INTERVAL '10 seconds';", (id_torneo,))
+                conexion.commit()
+                return True
         except Exception as e:
-            print(f"Error buscando fantasmas: {e}")
-            muertos = []
+            print(f"Error limpiando fantasmas de sala: {e}")
+            return False
         finally:
             conexion.close()
 
-        for m in muertos:
-            self.eliminar_conexion_instancia(m[0]) # La eliminación detona la herencia
+    def verificar_master_activo(self, id_torneo):
+        """Verifica si hay un admin vivo, purgando fantasmas antes de responder."""
+        conexion = self.conectar()
+        if not conexion: return None
+        try:
+            with conexion.cursor() as cur:
+                # 1. Pulverizar a cualquier Máster o Guest que haya crasheado
+                cur.execute("DELETE FROM conexiones_torneo WHERE id_torneo = %s AND ultima_actividad < NOW() - INTERVAL '10 seconds';", (id_torneo,))
+                conexion.commit()
+                
+                # 2. Comprobar quién sobrevivió a la purga
+                cur.execute("SELECT nombre_dispositivo FROM conexiones_torneo WHERE id_torneo = %s AND es_master = TRUE;", (id_torneo,))
+                res = cur.fetchone()
+                return res[0] if res else None
+        except Exception as e:
+            print(f"Error al verificar master: {e}")
+            return None
+        finally:
+            conexion.close()
+
+    def verificar_oficial_en_uso(self, id_oficial):
+        """Evita bloqueos globales purgando sesiones principales que crashearon (15 segundos)."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                # 1. Cazafantasmas Global (App)
+                cur.execute("DELETE FROM sesion_app WHERE ultima_actividad < NOW() - INTERVAL '15 seconds';")
+                conexion.commit()
+                
+                # 2. Verificar si el oficial sigue realmente logueado tras la purga
+                cur.execute("SELECT nombre_dispositivo FROM sesion_app WHERE id_oficial = %s;", (id_oficial,))
+                res = cur.fetchone()
+                return True if res else False
+        except Exception as e:
+            print(f"Error verificando oficial en uso: {e}")
+            return False
+        finally:
+            conexion.close()
+
+    def latido_sesion_app(self, id_oficial):
+        """Mantiene viva tu sesión general en el software para evitar ser purgado."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                cur.execute("UPDATE sesion_app SET ultima_actividad = NOW() WHERE id_oficial = %s;", (id_oficial,))
+                conexion.commit()
+                return True
+        except Exception:
+            return False
+        finally:
+            conexion.close()
 
     # =================================================================
     # --- SISTEMA DE PRESENCIA GLOBAL (LOGIN DE LA APP) ---
@@ -913,25 +941,6 @@ class ConexionDB:
     def ping_sesion_app(self, id_oficial):
         """Mantiene viva la sesión global en la base de datos (Latido de la App)."""
         return self._ejecutar_insert("UPDATE sesion_app SET ultima_actividad = CURRENT_TIMESTAMP WHERE id_oficial = %s", (id_oficial,))
-
-    def verificar_oficial_en_uso(self, id_oficial):
-        """Verifica si el oficial ya está logueado en la app en otra computadora."""
-        conexion = self.conectar()
-        if not conexion: return False
-        try:
-            with conexion.cursor() as cur:
-                # 1. El Cazafantasmas Global: Limpia a los que cerraron forzosamente hace > 6 segundos
-                cur.execute("DELETE FROM sesion_app WHERE CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '6 seconds'")
-                conexion.commit()
-                
-                # 2. Verificamos si, después de limpiar, el oficial solicitado sigue vivo
-                cur.execute("SELECT id_oficial FROM sesion_app WHERE id_oficial = %s", (id_oficial,))
-                return True if cur.fetchone() else False
-        except Exception as e:
-            print(f"Error verificando uso de oficial: {e}")
-            return False
-        finally:
-            conexion.close()
 
     def actualizar_oficial_conexion(self, id_conexion, id_oficial_nuevo):
         """Actualiza el ID del oficial en una conexión existente (Cambio rápido de árbitro)."""

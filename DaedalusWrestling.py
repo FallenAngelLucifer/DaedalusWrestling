@@ -71,6 +71,9 @@ class AplicacionPrincipal(tk.Tk):
         # --- PANTALLA DE INICIO DE SESIÓN ---
         self.construir_pantalla_login()
 
+        # CORRECCIÓN: El nombre debe ser ciclo_latido_global
+        self.ciclo_latido_global()
+
     # ================= MÉTODOS DE LIMPIEZA Y CIERRE =================
     def limpieza_emergencia(self):
         """Se ejecuta si el programa se cierra forzosamente (X de la ventana o VS Code)."""
@@ -121,9 +124,12 @@ class AplicacionPrincipal(tk.Tk):
         id_seleccionado = self.lista_oficiales[idx]['id']
         nombre_oficial = f"{self.lista_oficiales[idx]['nombre']} {self.lista_oficiales[idx]['apellidos']}"
         
-        # Bloqueo de Doble Sesión
+        # --- NUEVO: Purga automática antes de validar ---
+        if hasattr(self.db, 'verificar_oficial_en_uso'):
+            self.db.verificar_oficial_en_uso(0) # El ID 0 dispara la limpieza por tiempo en la BD
+            
         if self.db.verificar_oficial_en_uso(id_seleccionado):
-            return messagebox.showerror("Acceso Denegado", f"El árbitro '{nombre_oficial}' ya tiene una sesión activa en otro dispositivo.\n\nPor favor, seleccione otro perfil.")
+            return messagebox.showerror("Acceso Denegado", f"El árbitro '{nombre_oficial}' ya tiene una sesión activa.")
 
         # --- NUEVO: REGISTRAR PRESENCIA GLOBAL ---
         import os
@@ -156,9 +162,13 @@ class AplicacionPrincipal(tk.Tk):
 
     def ciclo_latido_global(self):
         """Mantiene la sesión de la aplicación viva en la Base de Datos."""
+        # Solo actúa si el usuario ya se logueó
         if getattr(self, 'latido_global_activo', False) and getattr(self, 'id_operador', None):
-            self.db.ping_sesion_app(self.id_operador)
-            self.after(2000, self.ciclo_latido_global) # Repite cada 2 segundos
+            # Asegúrate de que 'ping_sesion_app' sea el nombre en conexion_db.py
+            self.db.ping_sesion_app(self.id_operador) 
+            
+        # El bucle se mantiene corriendo cada 2 segundos esperando el login
+        self.after(2000, self.ciclo_latido_global)
 
     def cerrar_sesion(self):
         """Maneja el cierre de sesión voluntario del usuario para salir al Login."""
@@ -231,6 +241,10 @@ class AplicacionPrincipal(tk.Tk):
             nuevo_id = oficiales[idx]['id']
             if nuevo_id == self.id_operador:
                 return messagebox.showinfo("Aviso", "Ya está operando con este árbitro.", parent=ventana)
+
+            # --- NUEVO: Purga automática antes de validar ---
+            if hasattr(self.db, 'verificar_oficial_en_uso'):
+                self.db.verificar_oficial_en_uso(0)
 
             if self.db.verificar_oficial_en_uso(nuevo_id):
                 return messagebox.showerror("Denegado", "Ese árbitro ya está activo en otro equipo.", parent=ventana)
