@@ -852,27 +852,27 @@ class ConexionDB:
             conexion.close()
 
     def limpiar_conexiones_muertas(self, id_torneo):
-        """Purga de la sala a cualquier árbitro inactivo por más de 10 segundos."""
+        """Limpia periódicamente la tabla de conexiones de clientes inactivos."""
         conexion = self.conectar()
         if not conexion: return
         try:
             with conexion.cursor() as cur:
                 cur.execute("""
                     SELECT id FROM conexiones_torneo 
-                    WHERE id_torneo = %s AND CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '10 seconds'
+                    WHERE id_torneo = %s AND CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '5 seconds'
                 """, (id_torneo,))
                 muertos = cur.fetchall()
                 
                 for m in muertos:
-                    self.eliminar_conexion_instancia(m[0])
+                    self.eliminar_conexion_instancia(m['id'] if isinstance(m, dict) else m[0])
                 conexion.commit()
         except Exception as e:
-            print(f"Error limpiando fantasmas: {e}")
+            print(f"Error limpiando conexiones muertas: {e}")
         finally:
-            conexion.close()
+            if conexion: conexion.close()
 
     def verificar_master_activo(self, id_torneo):
-        """Verifica si hay un admin vivo, con tolerancia de 10 segundos."""
+        """Verifica si hay un admin vivo operando el torneo."""
         conexion = self.conectar()
         if not conexion: return None
         try:
@@ -880,8 +880,9 @@ class ConexionDB:
                 # Limpiamos antes de verificar para asegurar que el estado es real
                 cursor.execute("""
                     DELETE FROM conexiones_torneo 
-                    WHERE id_torneo = %s AND CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '10 seconds'
+                    WHERE id_torneo = %s AND CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '5 seconds'
                 """, (id_torneo,))
+                conexion.commit()
                 
                 cursor.execute("""
                     SELECT nombre_dispositivo 
@@ -894,21 +895,22 @@ class ConexionDB:
                     return resultado['nombre_dispositivo'] if isinstance(resultado, dict) else resultado[0]
                 return None
         except Exception as e:
+            print(f"Error verificando master: {e}")
             return None
         finally:
-            conexion.close()
+            if conexion: conexion.close()
 
     def verificar_oficial_en_uso(self, id_oficial):
-        """Verifica el estado de sesión, limpiando inactividad de más de 10 segundos."""
+        """Verifica si el oficial ya tiene una sesión abierta activa en cualquier PC."""
         conexion = self.conectar()
         if not conexion: return False
         try:
             with conexion.cursor() as cur:
-                # Reducido a 10 segundos: si la app crashea, en 10s el árbitro queda libre
-                cur.execute("DELETE FROM sesion_app WHERE CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '10 seconds'")
+                # Reducido a 5 segundos para limpieza ultrarrápida
+                cur.execute("DELETE FROM sesion_app WHERE CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '5 seconds'")
                 conexion.commit()
                 
-                if id_oficial == 0: return False # Retorno rápido si solo queríamos limpiar
+                if id_oficial == 0: return False # Solo limpieza
                 
                 cur.execute("SELECT id_oficial FROM sesion_app WHERE id_oficial = %s", (id_oficial,))
                 return True if cur.fetchone() else False
@@ -916,7 +918,7 @@ class ConexionDB:
             print(f"Error verificando uso: {e}")
             return False
         finally:
-            conexion.close()
+            if conexion: conexion.close()
 
     def latido_sesion_app(self, id_oficial):
         """Mantiene viva tu sesión general en el software para evitar ser purgado."""
