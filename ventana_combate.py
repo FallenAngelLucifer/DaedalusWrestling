@@ -33,7 +33,10 @@ class VentanaCombate(tk.Toplevel):
         self.tiempo_segundos = self.duracion_periodo
         self.timer_corriendo = False
         self.timer_id = None
-        self.tiempo_act_segundos = 0  # <-- NUEVO: Cronómetro de 30s ACT
+        
+        # --- NUEVO: Variables exclusivas para el Modo ACT ---
+        self.modo_act_activo = False
+        self.tiempo_act_segundos = 0  
         
         # Historial para Deshacer/Editar
         self.historial_acciones = []
@@ -52,15 +55,32 @@ class VentanaCombate(tk.Toplevel):
             "VPO - Victoria por Puntos (sin puntos del perdedor)"
         ]
 
-        # --- LÓGICA DE OPERADOR DE SOFTWARE ---
-        # Si tienes sistema de login, asume que el ID está guardado en self.parent.id_usuario_actual
-        # Si no lo tienes aún, esto actúa como Placeholder (ej. -1 no excluye a nadie por ahora)
-        self.id_operador_actual = getattr(self.parent, "id_usuario_actual", -1) 
+        # --- LÓGICA DE OPERADOR DE SOFTWARE (JEFE DE TAPIZ) ---
+        self.id_jefe_tapiz_actual = getattr(self.parent.controller, "id_operador", None)
+        self.nombre_jefe_tapiz = "Desconocido"
         
-        # Filtramos al operador para que no sea seleccionable como árbitro en la pista
         oficiales_todos = self.parent.db.obtener_oficiales() if hasattr(self.parent, 'db') else []
-        self.oficiales_db = [o for o in oficiales_todos if o['id'] != self.id_operador_actual]
+        id_torneo = getattr(self.parent, 'id_torneo', None)
+        oficiales_ocupados = set()
+        
+        if id_torneo and hasattr(self.parent.db, 'obtener_conexiones_torneo'):
+            conexiones = self.parent.db.obtener_conexiones_torneo(id_torneo)
+            for c in conexiones:
+                if c.get('id_oficial'):
+                    oficiales_ocupados.add(c['id_oficial'])
+                    
+        # Identificamos el nombre del Jefe de Tapiz actual
+        for o in oficiales_todos:
+            if o['id'] == self.id_jefe_tapiz_actual:
+                self.nombre_jefe_tapiz = f"{o['apellidos']}, {o['nombre']}"
+                break
+                
+        # Filtramos para que los combobox NO muestren al Jefe de Tapiz ni a los de otras PCs
+        self.oficiales_db = [o for o in oficiales_todos if o['id'] not in oficiales_ocupados and o['id'] != self.id_jefe_tapiz_actual]
         self.nombres_oficiales = [f"{o['apellidos']}, {o['nombre']}" for o in self.oficiales_db]
+
+        # --- NUEVO: OBTENER EL NOMBRE REAL DEL TAPIZ ---
+        self.mi_tapiz = getattr(self.parent.controller, 'tapiz_asignado', 'TAPIZ A').upper()
 
         # --- NUEVO: SELECTOR DE TAPIZ ---
         tapices_disponibles = [f"Tapiz {chr(65+i)}" for i in range(self.num_tapices)] # Genera Tapiz A, B, C...
@@ -88,7 +108,8 @@ class VentanaCombate(tk.Toplevel):
         header = tk.Frame(self, bg="#2a2a2a", height=60)
         header.pack(fill="x")
         
-        tk.Label(header, text=f"RONDA {self.match_node['ronda']} - TAPIZ A", fg="white", bg="#2a2a2a", font=("Helvetica", 14, "bold")).pack(pady=(5, 0))
+        # --- NUEVO: Usando el tapiz real ---
+        tk.Label(header, text=f"RONDA {self.match_node['ronda']} - {self.mi_tapiz}", fg="white", bg="#2a2a2a", font=("Helvetica", 14, "bold")).pack(pady=(5, 0))
         self.lbl_estado_periodo = tk.Label(header, text="PERIODO 1", fg="#ffcc00", bg="#2a2a2a", font=("Helvetica", 12, "bold"))
         self.lbl_estado_periodo.pack(pady=(0, 5))
 
@@ -104,19 +125,24 @@ class VentanaCombate(tk.Toplevel):
         self.cmb_juez = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
         self.cmb_juez.pack(side="left", padx=5)
         
-        tk.Label(frame_arbitros, text="Jefe Tapiz:", bg="#1e1e1e", fg="white", font=("Helvetica", 9, "bold")).pack(side="left", padx=(15, 5))
-        self.cmb_jefe = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=20)
-        self.cmb_jefe.pack(side="left", padx=5)
+        # --- NUEVO: El Jefe de Tapiz es el operador del software (Etiqueta fija) ---
+        tk.Label(frame_arbitros, text="Jefe Tapiz:", bg="#1e1e1e", fg="white", font=("Helvetica", 9, "bold")).pack(side="left", padx=(25, 5))
+        tk.Label(frame_arbitros, text=f"⭐ {self.nombre_jefe_tapiz}", bg="#1e1e1e", fg="#17a2b8", font=("Helvetica", 10, "bold")).pack(side="left", padx=5)
 
         aplicar_autocompletado(self.cmb_arbitro, self.nombres_oficiales)
         aplicar_autocompletado(self.cmb_juez, self.nombres_oficiales)
-        aplicar_autocompletado(self.cmb_jefe, self.nombres_oficiales)
         
-        # Preseleccionar los 3 primeros de la base de datos si existen
+        # Preseleccionar los 2 primeros de la base de datos si existen
         if self.nombres_oficiales:
             self.cmb_arbitro.current(0)
             self.cmb_juez.current(1 if len(self.nombres_oficiales) > 1 else 0)
-            self.cmb_jefe.current(2 if len(self.nombres_oficiales) > 2 else 0)
+            
+        # Memoria para el intercambio automático
+        self.prev_arbitro_val = self.cmb_arbitro.get()
+        self.prev_juez_val = self.cmb_juez.get()
+        
+        self.cmb_arbitro.bind("<<ComboboxSelected>>", self.validar_intercambio_arbitros)
+        self.cmb_juez.bind("<<ComboboxSelected>>", self.validar_intercambio_arbitros)
         
         # ================= TABLERO PRINCIPAL =================
         board = tk.Frame(self, bg="#121212")
@@ -211,75 +237,128 @@ class VentanaCombate(tk.Toplevel):
         tk.Button(center, text="🚫 DOBLE DSQ", font=("Helvetica", 9, "bold"), bg="#8b0000", fg="white", width=18, command=self.declarar_doble_dsq).pack(side="bottom", pady=(5, 20))
         tk.Button(center, text="↩ DESHACER ÚLTIMO", font=("Helvetica", 9, "bold"), bg="gray", fg="white", width=18, command=self.deshacer_accion).pack(side="bottom", pady=5)
 
+    def validar_intercambio_arbitros(self, event):
+        """Si selecciona un árbitro que ya está en el otro cargo, los intercambia automáticamente."""
+        val_arb = self.cmb_arbitro.get()
+        val_juez = self.cmb_juez.get()
+        
+        if val_arb == val_juez and val_arb != "":
+            # Si quien disparó el evento fue el Árbitro, le damos al Juez el valor viejo del Árbitro
+            if event.widget == self.cmb_arbitro:
+                self.cmb_juez.set(getattr(self, 'prev_arbitro_val', ''))
+            # Si quien disparó fue el Juez, le damos al Árbitro el valor viejo del Juez
+            else:
+                self.cmb_arbitro.set(getattr(self, 'prev_juez_val', ''))
+                
+        # Actualizamos las memorias para el próximo movimiento
+        self.prev_arbitro_val = self.cmb_arbitro.get()
+        self.prev_juez_val = self.cmb_juez.get()
+
     # ================= LÓGICA DE TIEMPO Y PERIODOS =================
     def actualizar_reloj_visual(self):
         mins, secs = divmod(self.tiempo_segundos, 60)
         self.lbl_reloj.config(text=f"{mins:02d}:{secs:02d}")
-        if hasattr(self, 'tiempo_act_segundos') and self.tiempo_act_segundos > 0:
-            self.lbl_act.config(text=f"ACT: {self.tiempo_act_segundos:02d}s")
+        
+        if getattr(self, 'modo_act_activo', False):
+            # Si el ACT manda, lo pintamos de rojo y opacamos el principal
+            self.lbl_act.config(text=f"ACT: {self.tiempo_act_segundos:02d}s", fg="#ff4d4d") 
+            self.lbl_reloj.config(fg="gray") 
         else:
             if hasattr(self, 'lbl_act'): self.lbl_act.config(text="")
+            # Restaurar color del reloj principal según el periodo
+            color_reloj = "#ff4d4d" if self.periodo_actual == 0 else "#ffcc00"
+            self.lbl_reloj.config(fg=color_reloj)
 
     def modificar_tiempo(self, segundos):
         if not self.timer_corriendo:
-            self.tiempo_segundos += segundos
-            if self.tiempo_segundos < 0: self.tiempo_segundos = 0
+            # Los botones de sumar/restar tiempo ahora también respetan al ACT
+            if getattr(self, 'modo_act_activo', False):
+                self.tiempo_act_segundos += segundos
+                if self.tiempo_act_segundos < 0: self.tiempo_act_segundos = 0
+            else:
+                self.tiempo_segundos += segundos
+                if self.tiempo_segundos < 0: self.tiempo_segundos = 0
             self.actualizar_reloj_visual()
 
     def iniciar_30s_act(self):
         if self.periodo_actual in (1, 2):
-            self.tiempo_act_segundos = 30
+            if getattr(self, 'modo_act_activo', False):
+                # 1. APAGAR ACT y devolver el control al reloj principal
+                self.modo_act_activo = False
+                self.tiempo_act_segundos = 0
+                self.pausar_cronometro() # Pausa de seguridad
+                self.btn_iniciar.config(text="▶ CONTINUAR")
+            else:
+                # 2. ENCENDER ACT y secuestrar el control de Play/Pausa
+                self.modo_act_activo = True
+                self.tiempo_act_segundos = 30
+                self.pausar_cronometro() # Congela el principal
+                self.btn_iniciar.config(text="▶ INICIAR ACT")
+            
             self.actualizar_reloj_visual()
 
     def avanzar_fase(self):
-        self.tiempo_act_segundos = 0 # Detener ACT al cambiar fase
+        self.modo_act_activo = False # Seguridad: Apagar ACT al cambiar de fase
+        self.tiempo_act_segundos = 0 
+        
         if self.periodo_actual == 1:
             self.periodo_actual = 0; self.tiempo_segundos = 30
             self.lbl_estado_periodo.config(text="DESCANSO", fg="#ff4d4d")
-            self.lbl_reloj.config(fg="#ff4d4d")
             for widget in self.log_rojo.winfo_children(): widget.pack_forget()
             for widget in self.log_azul.winfo_children(): widget.pack_forget()
         elif self.periodo_actual == 0:
             self.periodo_actual = 2; self.tiempo_segundos = self.duracion_periodo
             self.lbl_estado_periodo.config(text="PERIODO 2", fg="#ffcc00")
-            self.lbl_reloj.config(fg="#ffcc00")
         elif self.periodo_actual == 2:
             self.periodo_actual = 3
             self.lbl_estado_periodo.config(text="FIN DEL COMBATE", fg="#00ccff")
         self.actualizar_reloj_visual()
 
     def bucle_cronometro(self):
-        if self.timer_corriendo and self.tiempo_segundos > 0:
-            self.tiempo_segundos -= 1
-            if hasattr(self, 'tiempo_act_segundos') and self.tiempo_act_segundos > 0:
-                self.tiempo_act_segundos -= 1
-            self.actualizar_reloj_visual()
-            if self.tiempo_segundos <= 0: self.timer_corriendo = False 
-            else: self.timer_id = self.after(1000, self.bucle_cronometro)
+        if self.timer_corriendo:
+            if getattr(self, 'modo_act_activo', False):
+                # --- BUCLE EXCLUSIVO DEL ACT ---
+                if self.tiempo_act_segundos > 0:
+                    self.tiempo_act_segundos -= 1
+                    self.actualizar_reloj_visual()
+                    if self.tiempo_act_segundos <= 0:
+                        self.timer_corriendo = False 
+                    else:
+                        self.timer_id = self.after(1000, self.bucle_cronometro)
+            else:
+                # --- BUCLE DEL RELOJ PRINCIPAL ---
+                if self.tiempo_segundos > 0:
+                    self.tiempo_segundos -= 1
+                    self.actualizar_reloj_visual()
+                    if self.tiempo_segundos <= 0: 
+                        self.timer_corriendo = False 
+                    else: 
+                        self.timer_id = self.after(1000, self.bucle_cronometro)
 
     def iniciar_cronometro(self):
         if self.periodo_actual == 3: return # Combate finalizado
 
-        # Cambiar el texto a CONTINUAR tras el primer uso
-        self.btn_iniciar.config(text="▶ CONTINUAR")
-
-        # REGLA 1: Si el cronómetro está en cero, avanzar fase pero permanecer en pausa
-        if self.tiempo_segundos <= 0:
-            self.avanzar_fase()
-            # Al salir aquí, obligamos al usuario a pulsar CONTINUAR de nuevo para arrancar
-            return 
+        if getattr(self, 'modo_act_activo', False):
+            # El botón de iniciar responde solo al ACT
+            if self.tiempo_act_segundos <= 0: return 
+            self.btn_iniciar.config(text="▶ CONTINUAR ACT")
+        else:
+            # El botón de iniciar responde al principal
+            self.btn_iniciar.config(text="▶ CONTINUAR")
+            if self.tiempo_segundos <= 0:
+                self.avanzar_fase()
+                return 
             
-        # REGLA 2: Si hay tiempo disponible y no está corriendo, iniciar el bucle
         if not self.timer_corriendo:
             self.timer_corriendo = True
             self.bucle_cronometro()
 
     def pausar_cronometro(self):
+        # La pausa detiene el bucle (sin importar a cuál reloj estaba controlando)
         self.timer_corriendo = False
         if self.timer_id:
             self.after_cancel(self.timer_id)
             self.timer_id = None
-            self.tiempo_act_segundos = 0  # <-- NUEVO: Cronómetro de 30s ACT
 
     # ================= MATEMÁTICAS CENTRALES DE PUNTUACIÓN =================
     def ajustar_puntuacion(self, esquina, periodo, cantidad):
@@ -405,7 +484,7 @@ class VentanaCombate(tk.Toplevel):
             motivo = cmb_motivo.get()
             id_arb = self.oficiales_db[self.cmb_arbitro.current()]['id'] if self.cmb_arbitro.current() != -1 else None
             id_jue = self.oficiales_db[self.cmb_juez.current()]['id'] if self.cmb_juez.current() != -1 else None
-            id_jef = self.oficiales_db[self.cmb_jefe.current()]['id'] if self.cmb_jefe.current() != -1 else None
+            id_jef = self.id_jefe_tapiz_actual
 
             # Limpiar el historial (Quitar los widgets de TKinter para que no den error)
             historial_limpio = []
@@ -430,7 +509,7 @@ class VentanaCombate(tk.Toplevel):
             
             id_arb = self.oficiales_db[self.cmb_arbitro.current()]['id'] if self.cmb_arbitro.current() != -1 else None
             id_jue = self.oficiales_db[self.cmb_juez.current()]['id'] if self.cmb_juez.current() != -1 else None
-            id_jef = self.oficiales_db[self.cmb_jefe.current()]['id'] if self.cmb_jefe.current() != -1 else None
+            id_jef = self.id_jefe_tapiz_actual
             
             historial_limpio = [{'esquina': acc['esquina'], 'puntos': acc['puntos'], 'periodo': acc['periodo'], 'is_p': acc['is_p'], 'orden': i + 1} for i, acc in enumerate(self.historial_acciones)]
             totales = {'rojo': self.score_rojo.get(), 'azul': self.score_azul.get()}

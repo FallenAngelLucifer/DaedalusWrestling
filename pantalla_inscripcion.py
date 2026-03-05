@@ -4,8 +4,7 @@ import re
 from datetime import datetime
 from conexion_db import ConexionDB
 from ventana_nuevo_atleta import VentanaNuevoRegistro
-from utilidades import aplicar_autocompletado
-from utilidades import ComboBuscador
+from utilidades import aplicar_autocompletado, ComboBuscador, aplicar_deseleccion_tabla
 
 class PantallaInscripcion(ttk.Frame):
     def __init__(self, parent, controller):
@@ -110,6 +109,7 @@ class PantallaInscripcion(ttk.Frame):
 
         columnas_red = ("id", "nombre", "dispositivo", "tapiz", "estado")
         self.tabla_red = ttk.Treeview(net_middle_frame, columns=columnas_red, show="headings", height=3)
+        aplicar_deseleccion_tabla(self.tabla_red)
         self.tabla_red.bind("<<TreeviewSelect>>", self.gestionar_estado_botones_red)
         self.tabla_red.heading("id", text="ID"); self.tabla_red.column("id", width=30, anchor="center")
         self.tabla_red.heading("nombre", text="Árbitro"); self.tabla_red.column("nombre", width=100, anchor="w")
@@ -293,6 +293,7 @@ class PantallaInscripcion(ttk.Frame):
         
         # TABLA REDUCIDA (height=3 en vez de 4) para permitir que los elementos superiores usen el espacio
         self.tabla = ttk.Treeview(tabla_frame, columns=columnas, show="", height=3)
+        aplicar_deseleccion_tabla(self.tabla)
         
         self.tabla.column("#0", width=0, stretch=tk.NO)
         self.tabla.column("id", width=40, anchor="center", stretch=False) 
@@ -438,13 +439,21 @@ class PantallaInscripcion(ttk.Frame):
         has_id = getattr(self, "torneo_debug_id", None) is not None
         es_master = getattr(self.controller, 'es_master', False)
 
+        # --- NUEVO: Validar si soy un invitado en espera ---
+        texto_lbl = self.lbl_tapete_master.cget("text") if hasattr(self, 'lbl_tapete_master') else ""
+        soy_guest_pendiente = (not es_master and "⏳" in texto_lbl)
+
         # 1. SI EL TORNEO ESTÁ CERRADO O TODAS LAS LLAVES CONFIRMADAS
         if is_finalizado or is_todo_bloqueado:
             self.btn_guardar_torneo.pack_forget() 
             if hasattr(self, 'frame_acciones_memoria'):
                 self.frame_acciones_memoria.pack_forget() 
             if hasattr(self, 'btn_avanzar_pareo'):
-                self.btn_avanzar_pareo.config(state="normal")
+                # BLOQUEO: Si el invitado no está aprobado, no puede avanzar aunque el torneo esté listo
+                if soy_guest_pendiente:
+                    self.btn_avanzar_pareo.config(state="disabled")
+                else:
+                    self.btn_avanzar_pareo.config(state="normal")
             return
 
         # 2. SI EL TORNEO ESTÁ ACTIVO
@@ -457,12 +466,11 @@ class PantallaInscripcion(ttk.Frame):
                 
             if es_master:
                 self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
-                estado_pareo = "normal" # El Máster siempre puede avanzar
+                estado_pareo = "normal" 
             else:
-                texto_lbl = self.lbl_tapete_master.cget("text")
                 estado = "normal" if "✅" in texto_lbl else "disabled"
                 self.btn_guardar_torneo.config(state=estado, text="☁️ Sincronizar Atletas")
-                estado_pareo = estado # --- CORRECCIÓN: El Guest solo avanza si está aprobado ---
+                estado_pareo = estado 
                 
             if hasattr(self, 'btn_avanzar_pareo'):
                 self.btn_avanzar_pareo.config(state=estado_pareo)
@@ -892,17 +900,36 @@ class PantallaInscripcion(ttk.Frame):
         self.actualizar_btn_nuevo_limpiar()
 
     def cancelar_edicion_torneo(self):
-        self.ent_tor_nombre.delete(0, tk.END); self.ent_tor_nombre.insert(0, self.torneo_nombre_conf)
-        self.ent_tor_lugar.delete(0, tk.END); self.ent_tor_lugar.insert(0, self.torneo_lugar_conf)
-        self.cmb_tor_ciudad.set(getattr(self, 'torneo_ciudad_conf', '')) # <-- NUEVO
+        # 1. Habilitar temporalmente para poder restaurar los datos
+        self.ent_tor_nombre.config(state="normal")
+        self.ent_tor_lugar.config(state="normal")
+        self.cmb_tor_ciudad.config(state="normal")
+        self.cmb_categoria.config(state="normal")
+
+        # 2. Restaurar datos desde la memoria
+        self.ent_tor_nombre.delete(0, tk.END)
+        self.ent_tor_nombre.insert(0, self.torneo_nombre_conf)
+        self.ent_tor_lugar.delete(0, tk.END)
+        self.ent_tor_lugar.insert(0, self.torneo_lugar_conf)
+        self.cmb_tor_ciudad.set(getattr(self, 'torneo_ciudad_conf', '')) 
         self.cmb_categoria.set(self.categoria_confirmada)
 
-        self.ent_tor_nombre.config(state="disabled"); self.ent_tor_lugar.config(state="disabled"); self.cmb_categoria.config(state="disabled")
+        # 3. Volver a bloquear la cabecera
+        self.ent_tor_nombre.config(state="disabled")
+        self.ent_tor_lugar.config(state="disabled")
+        self.cmb_categoria.config(state="disabled")
+        self.cmb_tor_ciudad.config(state="disabled") 
+        
         self.btn_confirmar_torneo.config(text="Modificar Torneo")
         self.btn_cancelar_torneo.pack_forget()
-        self.form_frame.config(text="2. Inscripción y Pesaje (Habilitado)")
-        self.cambiar_estado_inscripcion("normal")
-        self.cmb_tor_ciudad.config(state="disabled") # <-- NUEVO
+        
+        # --- NUEVO: PREGUNTAR ANTES DE HABILITAR LA INSCRIPCIÓN ---
+        if getattr(self, "todo_bloqueado", False):
+            self.form_frame.config(text="2. Inscripción y Pesaje (Torneo Bloqueado)")
+            self.cambiar_estado_inscripcion("disabled")
+        else:
+            self.form_frame.config(text="2. Inscripción y Pesaje (Habilitado)")
+            self.cambiar_estado_inscripcion("normal")
 
         self.actualizar_btn_nuevo_limpiar()
 
@@ -1344,6 +1371,7 @@ class PantallaInscripcion(ttk.Frame):
 
         columnas = ("id", "nombre", "fecha", "categoria")
         tabla_torneos = ttk.Treeview(ventana, columns=columnas, show="headings")
+        aplicar_deseleccion_tabla(tabla_torneos)
         tabla_torneos.heading("id", text="ID"); tabla_torneos.column("id", width=50, anchor="center")
         tabla_torneos.heading("nombre", text="Nombre"); tabla_torneos.column("nombre", width=250, anchor="w")
         tabla_torneos.heading("fecha", text="Fecha"); tabla_torneos.column("fecha", width=100, anchor="center")
@@ -1420,6 +1448,12 @@ class PantallaInscripcion(ttk.Frame):
         # 5. --- APLICACIÓN MANUAL DE ESTADO "CONFIRMADO" ---
         self.torneo_debug_id = id_torneo
         self.categoria_confirmada = datos_torneo['categoria']
+        
+        # --- NUEVO: Guardar en la memoria de respaldo para que el botón 'Cancelar' funcione ---
+        self.torneo_nombre_conf = datos_torneo['nombre']
+        self.torneo_lugar_conf = datos_torneo['lugar']
+        self.torneo_ciudad_conf = datos_torneo.get('ciudad_nombre', '')
+        
         self.oficiales_db = self.db.obtener_oficiales()
 
         # Configuración por defecto: Torneo Confirmado y Listo para Inscribir
@@ -1528,15 +1562,19 @@ class PantallaInscripcion(ttk.Frame):
 
     def guardar_solo_torneo(self):
         """Decide entre Crear Sala, Guardar Cambios o (si es Guest) Sincronizar Atletas."""
-        if not getattr(self, 'torneo_debug_id', None) and getattr(self.controller, 'es_master', False) == False:
-            return messagebox.showwarning("Aviso", "No hay un torneo activo al que sincronizar.")
+        
+        id_existente = getattr(self, 'torneo_debug_id', None)
+        es_master = getattr(self.controller, 'es_master', False)
+        
+        # 1. Identificar inteligentemente si somos INVITADOS (Tenemos torneo cargado, pero no somos el Máster)
+        soy_guest = bool(id_existente) and not es_master
 
-        # --- NUEVO: FILTRO PARA INVITADOS (GUEST) ---
-        if not getattr(self.controller, 'es_master', False):
+        # --- FILTRO PARA INVITADOS (GUEST) ---
+        if soy_guest:
             if not messagebox.askyesno("Sincronizar Atletas", "⚠️ Eres INVITADO en esta sala.\n\n¿Deseas enviar tus atletas a la base de datos central para que el Máster los incluya en el torneo?"):
                 return
                 
-            exito = self.db.sincronizar_inscripciones(self.torneo_debug_id, self.inscripciones_memoria)
+            exito = self.db.sincronizar_inscripciones(id_existente, self.inscripciones_memoria)
             if exito:
                 messagebox.showinfo("Éxito", "Atletas sincronizados correctamente con la sala.")
                 self.actualizar_botones_guardado()
@@ -1544,7 +1582,7 @@ class PantallaInscripcion(ttk.Frame):
                 messagebox.showerror("Error", "No se pudieron sincronizar los atletas.")
             return
 
-        # --- LÓGICA ORIGINAL PARA EL MÁSTER ---
+        # --- LÓGICA PARA EL CREADOR O MÁSTER ---
         if not self.inscripciones_memoria:
             return messagebox.showwarning("Sin Atletas", "Debe inscribir atletas antes de guardar.")
 
@@ -1588,12 +1626,18 @@ class PantallaInscripcion(ttk.Frame):
         id_cat = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
         id_ciu = self.map_ciudades_torneo.get(self.torneo_ciudad_conf, None)
         
+        # Aseguramos el formato de fecha compatible con PostgreSQL (YYYY-MM-DD)
+        try: 
+            fecha_db = datetime.strptime(self.ent_tor_fecha.get().strip(), "%d/%m/%Y").strftime("%Y-%m-%d")
+        except ValueError: 
+            fecha_db = datetime.now().strftime("%Y-%m-%d")
+
         datos_torneo = {
-            'nombre': self.ent_tor_nombre.get().strip(),
+            'nombre': self.torneo_nombre_conf,
             'id_categoria': id_cat,
-            'lugar': self.ent_tor_lugar.get().strip(),
+            'lugar': self.torneo_lugar_conf,
             'id_ciudad': id_ciu,
-            'fecha': self.ent_tor_fecha.get()
+            'fecha': fecha_db
         }
         
         id_torneo = self.db.guardar_torneo_completo(datos_torneo, self.inscripciones_memoria)
@@ -1621,6 +1665,13 @@ class PantallaInscripcion(ttk.Frame):
             self.lbl_tapete_master.config(text=f"🥇 Tapiz A (Máster: {nombre_oficial}) - {nombre_pc}", foreground="#28a745")
             
             self.bloquear_datos_torneo(False) # Abre el candado al volverse Máster
+            
+            # --- NUEVO: Re-bloquear los campos para que requieran presionar "Modificar Torneo" ---
+            self.ent_tor_nombre.config(state="disabled")
+            self.ent_tor_lugar.config(state="disabled")
+            self.cmb_categoria.config(state="disabled")
+            if hasattr(self, 'cmb_tor_ciudad'): self.cmb_tor_ciudad.config(state="disabled")
+            
             self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
             self.btn_avanzar_pareo.config(state="normal")
             
@@ -1645,17 +1696,8 @@ class PantallaInscripcion(ttk.Frame):
         p_pareo = self.controller.pantallas.get(PantallaPareo)
         
         if p_pareo:
-            # ---> CORRECCIÓN: SIEMPRE cargamos el torneo para que se dibujen las pestañas
+            # ---> Ahora ESTA ÚNICA línea carga el torneo e inicia la red silenciosamente
             p_pareo.cargar_torneo(self.torneo_debug_id)
-            
-            # ---> LUEGO, si estamos en red, iniciamos su motor y encendemos su radar
-            if hasattr(self.controller, 'id_conexion_red') and self.controller.id_conexion_red:
-                p_pareo.iniciar_torneo_red(
-                    self.controller.id_conexion_red, 
-                    self.controller.es_master, 
-                    self.controller.tapiz_asignado
-                )
-                
             self.controller.mostrar_pantalla(PantallaPareo)
 
     def iniciar_torneo_red(self, id_conexion, es_master, tapiz):

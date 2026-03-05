@@ -37,6 +37,16 @@ class ComboBuscador(ttk.Frame):
         # Usamos after_idle para asegurar que la interfaz ya esté cargada al hacer esto
         self.after_idle(self.vincular_clic_global)
 
+        # --- NUEVO: Escudo para estado Disabled ---
+        self.bind("<Button-1>", self._respetar_candado, add="+")
+        self.bind("<ButtonPress-1>", self._respetar_candado, add="+")
+        self.bind("<Key>", self._respetar_candado, add="+")
+
+    def _respetar_candado(self, event):
+        """Bloquea cualquier interacción física si el Combobox está deshabilitado."""
+        if self.cget("state") == "disabled":
+            return "break"
+
     # --- NUEVA LÓGICA DE CIERRE GLOBAL (CON SEGURO DE VIDA) ---
     def vincular_clic_global(self):
         try:
@@ -96,22 +106,22 @@ class ComboBuscador(ttk.Frame):
             if st == "disabled":
                 self.entry.config(state="disabled")
                 self.btn.config(bg="#f0f0f0", fg="#a0a0a0")
+                self.entry.unbind("<Button-1>") # <- DESENCHUFA EL CLIC
             elif st == "readonly":
                 self.entry.config(state="readonly")
                 self.btn.config(bg="#e1e1e1", fg="black")
-                # Si es readonly, permitimos abrir la lista haciendo clic en la caja
                 self.entry.bind("<Button-1>", lambda e: self.alternar(e))
             else:
                 self.entry.config(state="normal")
                 self.btn.config(bg="#e1e1e1", fg="black")
-                self.entry.unbind("<Button-1>") # Quitamos el clic si es normal
+                self.entry.unbind("<Button-1>")
         if 'values' in kwargs:
             self.lista_valores = list(kwargs['values'])
             
     def configure(self, **kwargs): self.config(**kwargs)
             
     def cget(self, key):
-        if key == "state": return self.entry.cget("state")
+        if key == "state": return str(self.entry.cget("state"))
         if key == "values": return self.lista_valores
         return super().cget(key)
         
@@ -126,6 +136,7 @@ class ComboBuscador(ttk.Frame):
             
     # --- LÓGICA DE BÚSQUEDA ---
     def filtrar(self, event):
+        if str(self.entry.cget("state")) == "disabled": return "break"
         if event.keysym in ('Up', 'Down', 'Return', 'Escape', 'Tab'): return
         
         texto = self.get().lower()
@@ -151,7 +162,9 @@ class ComboBuscador(ttk.Frame):
         self.panel.geometry(f"{w}x{h}+{x}+{y}")
         
     def alternar(self, event):
-        if self.entry.cget("state") == "disabled": return
+        # Escudo impenetrable con conversión a string
+        if str(self.entry.cget("state")) == "disabled": 
+            return "break"
         
         try:
             if not self.winfo_exists() or not self.panel.winfo_exists(): return
@@ -160,7 +173,6 @@ class ComboBuscador(ttk.Frame):
                 self.panel.withdraw()
                 self.validar_texto() 
             else:
-                # --- SOLUCIÓN: AL DAR CLIC, MOSTRAR SIEMPRE LA LISTA COMPLETA ---
                 self.listbox.delete(0, tk.END)
                 for item in self.lista_valores: 
                     self.listbox.insert(tk.END, item)
@@ -168,13 +180,12 @@ class ComboBuscador(ttk.Frame):
                 self.mostrar_panel()
                 self.entry.focus_set()
                 
-                # Auto-desplazarse (scroll) hasta el elemento actualmente seleccionado
                 txt_actual = self.get()
                 if txt_actual in self.lista_valores:
                     idx = self.lista_valores.index(txt_actual)
                     self.listbox.selection_clear(0, tk.END)
                     self.listbox.selection_set(idx)
-                    self.listbox.see(idx) # Hace scroll automático
+                    self.listbox.see(idx)
         except Exception:
             pass
             
@@ -187,6 +198,8 @@ class ComboBuscador(ttk.Frame):
             self.entry.focus_set()
             
     def manejar_teclas(self, event):
+        if str(self.entry.cget("state")) == "disabled": return "break"
+        
         if event.keysym == 'Down':
             if not self.panel.winfo_ismapped():
                 self.alternar(event)
@@ -365,3 +378,37 @@ def aplicar_formato_cedula(entry):
     entry.bind('<ButtonRelease-1>', corregir_cursor)
     entry.bind('<Key-Left>', lambda e: entry.after(1, corregir_cursor))
     entry.bind('<Key-Right>', lambda e: entry.after(1, corregir_cursor))
+
+def aplicar_deseleccion_tabla(arbol):
+    """Otorga a una tabla el poder de deseleccionar con clics en blanco, toggles o clics fuera de ella."""
+    
+    def al_clic_izquierdo(event):
+        item_clickeado = arbol.identify_row(event.y)
+        
+        # Escenario 1: Clic en espacio blanco dentro de la tabla
+        if not item_clickeado:
+            arbol.selection_remove(arbol.selection())
+            arbol.event_generate("<<TreeviewSelect>>")
+            return "break"
+            
+        # Escenario 2: Clic sobre un elemento ya seleccionado (Deselección tipo Ctrl+Clic)
+        if item_clickeado in arbol.selection():
+            arbol.selection_remove(item_clickeado)
+            arbol.event_generate("<<TreeviewSelect>>")
+            return "break" # Detiene el clic para que Tkinter no lo vuelva a marcar
+
+    def clic_afuera(event):
+        try:
+            clase = event.widget.winfo_class()
+            # Escenario 3: Clic fuera de la tabla. Ignoramos botones de acción y barras de scroll.
+            if event.widget != arbol and clase not in ('Treeview', 'Scrollbar', 'TScrollbar', 'Button', 'TButton'):
+                if arbol.selection():
+                    arbol.selection_remove(arbol.selection())
+                    arbol.event_generate("<<TreeviewSelect>>")
+        except Exception:
+            pass
+
+    # Enlazar eventos
+    arbol.bind("<Button-1>", al_clic_izquierdo, add="+")
+    # Enlazar el detector global a la ventana principal de esta tabla
+    arbol.winfo_toplevel().bind("<Button-1>", clic_afuera, add="+")

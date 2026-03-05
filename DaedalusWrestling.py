@@ -124,10 +124,11 @@ class AplicacionPrincipal(tk.Tk):
         id_seleccionado = self.lista_oficiales[idx]['id']
         nombre_oficial = f"{self.lista_oficiales[idx]['nombre']} {self.lista_oficiales[idx]['apellidos']}"
         
-        # --- NUEVO: Purga automática antes de validar ---
-        if hasattr(self.db, 'verificar_oficial_en_uso'):
-            self.db.verificar_oficial_en_uso(0) # El ID 0 dispara la limpieza por tiempo en la BD
-            
+        # --- NUEVO: TRIGGER DE LIMPIEZA INMEDIATA ---
+        # Llamamos a la función con un ID inexistente (0) solo para que ejecute el DELETE por tiempo
+        self.db.verificar_oficial_en_uso(0) 
+
+        # Ahora sí, verificamos si el oficial sigue realmente activo tras la purga
         if self.db.verificar_oficial_en_uso(id_seleccionado):
             return messagebox.showerror("Acceso Denegado", f"El árbitro '{nombre_oficial}' ya tiene una sesión activa.")
 

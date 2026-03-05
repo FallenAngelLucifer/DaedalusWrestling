@@ -5,7 +5,7 @@ import os
 import json
 from PIL import Image, EpsImagePlugin, ImageDraw, ImageFont
 from conexion_db import ConexionDB
-from utilidades import ComboBuscador
+from utilidades import ComboBuscador, aplicar_deseleccion_tabla
 from ventana_previsualizacion_pdf import VentanaPrevisualizacionPDF
 from ventana_login_red import VentanaLoginRed
 
@@ -57,7 +57,11 @@ class PantallaPareo(ttk.Frame):
         self.btn_regresar.pack(side="left", padx=20)
 
         lbl_titulo = ttk.Label(header_frame, text="Fase 2: Desarrollo de Pareo (Brackets)", font=("Helvetica", 16, "bold"))
-        lbl_titulo.pack(side="left", expand=True, padx=(0, 150))
+        lbl_titulo.pack(side="left", padx=(0, 20))
+
+        # --- NUEVO: Etiqueta de mi Tapiz Actual ---
+        self.lbl_mi_tapiz_header = ttk.Label(header_frame, text="📍 Tapiz Asignado: Pendiente", font=("Helvetica", 12, "bold"), foreground="#007bff")
+        self.lbl_mi_tapiz_header.pack(side="left", expand=True, anchor="w")
 
         # --- NUEVA FILA: Frame exclusivo para exportaciones masivas ---
         self.export_frame = ttk.Frame(self)
@@ -436,12 +440,8 @@ class PantallaPareo(ttk.Frame):
             json.dump(config, f, indent=4)
 
     def regresar_a_inscripcion(self):
-        """Regresa a la pantalla de inscripción forzando una actualización de su estado."""
+        """Regresa a la pantalla de inscripción manteniendo la conexión de red activa."""
         self.cerrar_panel_combate()
-        
-        # --- NUEVO: Desconectar de la red al salir ---
-        if hasattr(self, 'id_conexion_red'):
-            self.db.eliminar_conexion_instancia(self.id_conexion_red)
             
         from pantalla_inscripcion import PantallaInscripcion
         p_inscripcion = self.controller.pantallas.get(PantallaInscripcion)
@@ -451,26 +451,30 @@ class PantallaPareo(ttk.Frame):
         self.controller.mostrar_pantalla(PantallaInscripcion)
 
     def cargar_torneo(self, id_torneo):
-        """Intercepta la carga para iniciar sesión en la red o bloquear si ya terminó."""
+        """Intercepta la carga para heredar la sesión de red automáticamente o bloquear si ya terminó."""
         self.id_torneo = id_torneo
         
-        # Verificar si el torneo está cerrado ANTES de pedir login
+        # Verificar si el torneo está cerrado ANTES de armar la red
         conexion = self.db.conectar()
-        cerrado = False
+        self.torneo_cerrado_en_db = False
         if conexion:
             try:
                 with conexion.cursor() as cur:
                     cur.execute("SELECT fecha_fin FROM torneo WHERE id = %s", (self.id_torneo,))
                     res = cur.fetchone()
-                    if res and res[0] is not None: cerrado = True
+                    if res and res[0] is not None: self.torneo_cerrado_en_db = True
             finally: conexion.close()
             
-        if cerrado:
-            # Bypass del Login: Entra directo en modo visualización (Sin Master/Guest)
-            self.iniciar_torneo_red(None, False, "Visualización", -1)
+        if self.torneo_cerrado_en_db:
+            # Bypass: Entra directo en modo visualización
+            self.iniciar_torneo_red(None, False, "Visualización")
         else:
-            # Torneo activo: Lanza la ventana de login (Para ser Master o Guest)
-            VentanaLoginRed(self, self.id_torneo, self.iniciar_torneo_red)
+            # Heredar silenciosamente los datos de sesión desde el Controller
+            id_conn = getattr(self.controller, 'id_conexion_red', None)
+            es_master = getattr(self.controller, 'es_master', False)
+            tapiz = getattr(self.controller, 'tapiz_asignado', 'Pendiente')
+            
+            self.iniciar_torneo_red(id_conn, es_master, tapiz)
 
     def iniciar_torneo_red(self, id_conexion, es_master, tapiz):
         self.id_conexion_red = id_conexion
@@ -478,7 +482,6 @@ class PantallaPareo(ttk.Frame):
         self.tapiz_asignado = tapiz
 
         self.escuchando_red = True
-        self.actualizar_bucle_red()
 
         inscripciones = self.db.obtener_inscripciones_pareo(self.id_torneo)
         
@@ -520,6 +523,7 @@ class PantallaPareo(ttk.Frame):
         self.verificar_estado_torneo()
         self.gestionar_botones_globales()
         self.construir_panel_red()
+        self.actualizar_bucle_red()
 
     # ==========================================================
     # --- SISTEMA DE RED: PANEL Y BUCLES DE ACTUALIZACIÓN ---
@@ -548,6 +552,7 @@ class PantallaPareo(ttk.Frame):
         # TREEVIEW para todos los clientes (lista de guests)
         # ---> CORRECCIÓN: Se añade la columna 'estado' para que coincida con los datos insertados
         self.tree_red = ttk.Treeview(self.panel_red, columns=("id", "arbitro", "equipo", "tapiz", "estado"), show="headings", height=8)
+        aplicar_deseleccion_tabla(self.tree_red)
         self.tree_red.heading("id", text="ID")
         self.tree_red.heading("arbitro", text="Árbitro")
         self.tree_red.heading("equipo", text="Dispositivo")
@@ -591,19 +596,52 @@ class PantallaPareo(ttk.Frame):
 
     def actualizar_bucle_red(self):
         if not getattr(self, "escuchando_red", False): return
-        
-        # 1. Descargar combates bloqueados de forma segura
-        if hasattr(self.db, 'obtener_combates_en_curso'):
-            self.combates_en_curso_red = self.db.obtener_combates_en_curso(self.id_torneo)
-        else:
-            self.combates_en_curso_red = {}
 
-        # 2. Refrescar la cartelera de forma BLINDADA
+        # 1. Actualizar etiqueta superior con el tapiz asignado
+        if hasattr(self, 'lbl_mi_tapiz_header'):
+            tapiz_actual = getattr(self.controller, 'tapiz_asignado', 'Pendiente')
+            color_tapiz = "#28a745" if tapiz_actual != "Pendiente" else "#f39c12"
+            self.lbl_mi_tapiz_header.config(text=f"📍 Tapiz Asignado: {tapiz_actual}", foreground=color_tapiz)
+
+        # 2. Descargar combates bloqueados (en progreso)
+        if hasattr(self.db, 'obtener_combates_en_curso'):
+            nuevos_combates = self.db.obtener_combates_en_curso(self.id_torneo)
+        else:
+            nuevos_combates = {}
+
+        # 3. Descargar resultados de combates ya finalizados
+        if hasattr(self.db, 'cargar_resultados_combates'):
+            nuevos_resultados = self.db.cargar_resultados_combates(self.id_torneo)
+        else:
+            nuevos_resultados = getattr(self, 'resultados_combates', {})
+
+        # 4. Detectar si hubo cambios en progreso o en ganadores
+        estado_anterior_curso = getattr(self, 'combates_en_curso_red', {})
+        estado_anterior_resultados = getattr(self, 'resultados_combates', {})
+        
+        hubo_cambios = (nuevos_combates != estado_anterior_curso) or (nuevos_resultados != estado_anterior_resultados)
+        
+        self.combates_en_curso_red = nuevos_combates
+        
+        # Si hubo nuevos ganadores, reconstruimos la matriz lógica ANTES de dibujar
+        if nuevos_resultados != estado_anterior_resultados:
+            self.resultados_combates = nuevos_resultados
+            self.pre_cargar_memoria() 
+
+        # 5. Refrescar la interfaz SOLO si hubo un cambio real para evitar parpadeos
         if self.notebook.tabs() and self.notebook.select():
-            if self.notebook.index(self.notebook.select()) == 0:
-                self.actualizar_cartelera()
+            if hubo_cambios:
+                idx_pestana = self.notebook.index(self.notebook.select())
+                if idx_pestana == 0:
+                    self.actualizar_cartelera()
+                else:
+                    tab_actual = self.notebook.nametowidget(self.notebook.select())
+                    self.procesar_y_dibujar(tab_actual)
                 
-        # ---> CORRECCIÓN: Actualizar la lista de red SIEMPRE (Forzado, eliminamos winfo_ismapped)
+                # Refrescamos las estadísticas de torneo (Combates faltantes)
+                self.verificar_estado_torneo()
+
+        # 6. Refrescar lista lateral (Panel de Máster si aplica)
         if hasattr(self, 'refrescar_tabla_red'):
             self.refrescar_tabla_red()
         
@@ -795,6 +833,7 @@ class PantallaPareo(ttk.Frame):
         # TABLA DE DATOS
         columnas = ("ronda", "tapiz", "estilo", "peso", "rojo", "azul") # <-- NUEVO: Columna tapiz
         self.tree_cartelera = ttk.Treeview(contenedor_tabla, columns=columnas, show="", height=20)
+        aplicar_deseleccion_tabla(self.tree_cartelera)
         self.tree_cartelera.column("#0", width=0, stretch=tk.NO) 
         
         self.tree_cartelera.column("ronda", width=80, anchor="center", stretch=False)
@@ -806,6 +845,9 @@ class PantallaPareo(ttk.Frame):
         
         self.tree_cartelera.bind("<Double-1>", self.accion_doble_clic_cartelera)
         self.tree_cartelera.bind("<<TreeviewSelect>>", self.accion_clic_cartelera)
+
+        # --- NUEVO: Configurar color amarillo para combates en curso ---
+        self.tree_cartelera.tag_configure("en_curso", background="#ffc107", foreground="black")
 
         # --- EVENTOS DE CIERRE DEL PANEL FLOTANTE ---
         self.tree_cartelera.bind("<Button-1>", self.evaluar_cierre_flotante, add="+") # <-- NUEVO DETECTOR
@@ -956,11 +998,15 @@ class PantallaPareo(ttk.Frame):
         self.panel_flotante.place(x=max(10, x_pos), y=y_pos)
 
     def al_cambiar_pestana(self, event):
-        self.cerrar_panel_combate() # <-- NUEVO
+        self.cerrar_panel_combate()
             
-        # Si el usuario selecciona la pestaña de Cartelera (índice 0), la actualizamos
-        if self.notebook.index(self.notebook.select()) == 0:
+        # Refresca la información inmediatamente al entrar a la pestaña
+        idx = self.notebook.index(self.notebook.select())
+        if idx == 0:
             self.actualizar_cartelera()
+        else:
+            tab = self.notebook.nametowidget(self.notebook.select())
+            self.procesar_y_dibujar(tab)
 
     def actualizar_cartelera(self, event=None):
         self.cerrar_panel_flotante_cartelera() # <-- NUEVO: Borra el panel antes de recargar la tabla
@@ -993,6 +1039,9 @@ class PantallaPareo(ttk.Frame):
                             is_terminada = node.get("ganador") is not None
                             if is_terminada: completadas += 1
                             
+                            # --- NUEVO: Detectar si el combate está activo en red ---
+                            tapiz_activo = getattr(self, 'combates_en_curso_red', {}).get(llave_key, {}).get(node.get("match_id"))
+                            
                             todas_peleas.append({
                                 "ronda": node["ronda"],
                                 "prio_estilo": prio_estilo,
@@ -1007,7 +1056,8 @@ class PantallaPareo(ttk.Frame):
                                 "club_azul": p_azul.get('club', 'Sin Club'),
                                 "nodo_combate": node,
                                 "llave_key": llave_key,
-                                "terminada": is_terminada
+                                "terminada": is_terminada,
+                                "tapiz_activo": tapiz_activo # <--- NUEVO
                             })
                             
         # 2. Evaluar Estado: ¿Estamos en modo Historial?
@@ -1087,13 +1137,18 @@ class PantallaPareo(ttk.Frame):
                 registro_descanso[elegido["id_azul"]] = indice_actual
 
         # 3. Insertar la cartelera ya optimizada en la tabla visual
-        # --- NUEVO: Extraemos el tapiz actual de la red ---
-        tapiz_asignado = getattr(self.controller, 'tapiz_asignado', 'Tapiz A') 
-        
         for idx, c in enumerate(cartelera_final):
+            # Asignar texto de tapiz N.A o Tapiz X
+            tapiz_str = c['tapiz_activo'] if c['tapiz_activo'] else "N.A."
+            
+            # Asignar tags de control
+            tags_fila = [c['llave_key'], str(c['nodo_combate'])]
+            if c['tapiz_activo']:
+                tags_fila.append("en_curso") # Esto lo pintará de amarillo y bloqueará el clic
+
             self.tree_cartelera.insert("", "end", iid=str(idx), values=(
-                f"Ronda {c['ronda']}", tapiz_asignado, c['estilo'], c['peso_str'], c['nom_rojo'], c['nom_azul'] # <-- Añadimos el tapiz a los valores
-            ), tags=(c['llave_key'], str(c['nodo_combate'])))
+                f"Ronda {c['ronda']}", tapiz_str, c['estilo'], c['peso_str'], c['nom_rojo'], c['nom_azul']
+            ), tags=tuple(tags_fila))
             
             self.tree_cartelera.item(str(idx), text=c['llave_key'])
             setattr(self.tree_cartelera, f"nodo_{idx}", c['nodo_combate'])
@@ -1452,7 +1507,7 @@ class PantallaPareo(ttk.Frame):
                     canvas.create_rectangle(x, box_y1, x + box_w, box_y2, outline=color_borde, fill="#1e1e1e", width=2 if tapiz_activo else 1)
                     
                     if tapiz_activo and not ganador:
-                        canvas.create_text(x + box_w/2, box_y2 - 8, text=f"En curso: {tapiz_activo}", fill="#ffc107", font=("Helvetica", 7, "bold"))
+                        canvas.create_text(x + box_w/2, y,text=f"En curso: {tapiz_activo}", fill="#ffc107", font=("Helvetica", 7, "bold"))
                     
                     if self.modo_edicion:
                         nom_rojo = p_rojo['nombre'] if p_rojo else f"Ganador Ronda {node['ronda']-1}"
@@ -2025,20 +2080,25 @@ class PantallaPareo(ttk.Frame):
             return None
 
     def iniciar_pelea(self, match_node, tab, llave_key):
-        # Verificación extra por seguridad de red
+        # 1. Verificación local rápida
         tapiz_activo = getattr(self, 'combates_en_curso_red', {}).get(llave_key, {}).get(match_node["match_id"])
         if tapiz_activo:
             return messagebox.showwarning("Bloqueado", f"Este combate ya está activo en: {tapiz_activo}")
+
+        mi_tapiz = getattr(self.controller, 'tapiz_asignado', 'Tapiz X')
+        
+        # 2. --- NUEVO: Verificación estricta en la Base de Datos ---
+        if hasattr(self.db, 'marcar_combate_en_curso'):
+            exito = self.db.marcar_combate_en_curso(self.id_torneo, llave_key, match_node["match_id"], mi_tapiz)
+            if not exito:
+                # Si llegamos tarde por milisegundos, abortamos la apertura de la ventana
+                return messagebox.showwarning("Acceso Denegado", "Demasiado tarde. Otro tapiz acaba de abrir este combate.")
 
         from ventana_combate import VentanaCombate 
         self.cerrar_panel_combate() 
             
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
-        
-        # --- NUEVO: Bloquear combate en la BD ---
-        if hasattr(self.db, 'marcar_combate_en_curso'):
-            self.db.marcar_combate_en_curso(self.id_torneo, llave_key, match_node["match_id"], getattr(self.controller, 'tapiz_asignado', 'Tapiz X'))
         
         # Callback para soltar la BD si cierra la ventana con la X
         def liberar_combate():
