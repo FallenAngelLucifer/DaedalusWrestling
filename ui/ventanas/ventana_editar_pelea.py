@@ -1,8 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from conexion_db import ConexionDB
-from utilidades import aplicar_autocompletado
-from utilidades import ComboBuscador
+from database.conexion_db import ConexionDB
+from utils.utilidades import aplicar_autocompletado, ComboBuscador
 
 class VentanaEditarPelea(tk.Toplevel):
     def __init__(self, parent, match_node, p_rojo, p_azul, tab, llave_key, callback_actualizar):

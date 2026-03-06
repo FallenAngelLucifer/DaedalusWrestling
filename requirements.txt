@@ -1,5 +1,5 @@
-In console:
++ In console execute:
 pip install psycopg2-binary tkcalendar PyMuPDF reportlab Pillow Ghostscript
 
-Install GhostScript from it's official page:
++ Install GhostScript from it's official page:
 https://www.ghostscript.com/releases/gsdnld.html

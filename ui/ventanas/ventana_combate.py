@@ -1,7 +1,6 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-from utilidades import aplicar_autocompletado
-from utilidades import ComboBuscador
+from utils.utilidades import aplicar_autocompletado, ComboBuscador
 
 class VentanaCombate(tk.Toplevel):
     def __init__(self, parent, match_node, p_rojo, p_azul, callback_ganador, callback_cancelar=None, num_tapices=1):

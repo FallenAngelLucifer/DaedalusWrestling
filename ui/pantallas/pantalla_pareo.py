@@ -4,10 +4,10 @@ import math
 import os
 import json
 from PIL import Image, EpsImagePlugin, ImageDraw, ImageFont
-from conexion_db import ConexionDB
-from utilidades import ComboBuscador, aplicar_deseleccion_tabla
-from ventana_previsualizacion_pdf import VentanaPrevisualizacionPDF
-from ventana_login_red import VentanaLoginRed
+from database.conexion_db import ConexionDB
+from utils.utilidades import ComboBuscador, aplicar_deseleccion_tabla
+from ui.ventanas.ventana_previsualizacion_pdf import VentanaPrevisualizacionPDF
+from ui.ventanas.ventana_login_red import VentanaLoginRed
 
 # --- COLOR ORIGINAL DEL FONDO ---
 COLOR_FONDO_UI = (30, 30, 30) # Corresponde a #1e1e1e en RGB
@@ -443,7 +443,7 @@ class PantallaPareo(ttk.Frame):
         """Regresa a la pantalla de inscripción manteniendo la conexión de red activa."""
         self.cerrar_panel_combate()
             
-        from pantalla_inscripcion import PantallaInscripcion
+        from ui.pantallas.pantalla_inscripcion import PantallaInscripcion
         p_inscripcion = self.controller.pantallas.get(PantallaInscripcion)
         if p_inscripcion:
             p_inscripcion.refrescar_estado_bloqueos()
@@ -2139,7 +2139,7 @@ class PantallaPareo(ttk.Frame):
                 # Si llegamos tarde por milisegundos, abortamos la apertura de la ventana
                 return messagebox.showwarning("Acceso Denegado", "Demasiado tarde. Otro tapiz acaba de abrir este combate.")
 
-        from ventana_combate import VentanaCombate 
+        from ui.ventanas.ventana_combate import VentanaCombate 
         self.cerrar_panel_combate() 
             
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
@@ -2155,7 +2155,7 @@ class PantallaPareo(ttk.Frame):
                        callback_cancelar=liberar_combate)
 
     def editar_pelea(self, match_node, tab, llave_key): 
-        from ventana_editar_pelea import VentanaEditarPelea
+        from ui.ventanas.ventana_editar_pelea import VentanaEditarPelea
         
         self.cerrar_panel_combate() # <-- NUEVO
             
@@ -2575,7 +2575,7 @@ class PantallaPareo(ttk.Frame):
         p_rojo = self.obtener_peleador_real(match_node.get('peleador_rojo'))
         p_azul = self.obtener_peleador_real(match_node.get('peleador_azul'))
         
-        from ventana_editar_pelea import VentanaEditarPelea
+        from ui.ventanas.ventana_editar_pelea import VentanaEditarPelea
         # CORREGIDO: Usamos self.asignar_ganador que es la función que existe en tu código
         VentanaEditarPelea(self.winfo_toplevel(), match_node, p_rojo, p_azul, tab_objetivo, llave_key, self.asignar_ganador)
         

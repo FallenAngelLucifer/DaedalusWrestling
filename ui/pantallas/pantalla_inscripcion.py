@@ -2,9 +2,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import re
 from datetime import datetime
-from conexion_db import ConexionDB
-from ventana_nuevo_atleta import VentanaNuevoRegistro
-from utilidades import aplicar_autocompletado, ComboBuscador, aplicar_deseleccion_tabla, aplicar_formato_fecha
+from database.conexion_db import ConexionDB
+from ui.ventanas.ventana_nuevo_atleta import VentanaNuevoRegistro
+from utils.utilidades import aplicar_autocompletado, ComboBuscador, aplicar_deseleccion_tabla, aplicar_formato_fecha
 
 class PantallaInscripcion(ttk.Frame):
     def __init__(self, parent, controller):
@@ -1934,7 +1934,7 @@ class PantallaInscripcion(ttk.Frame):
         if not self.db.sincronizar_inscripciones(self.torneo_debug_id, self.inscripciones_memoria):
             return messagebox.showerror("Error", "Fallo al guardar los atletas en la base de datos.")
 
-        from pantalla_pareo import PantallaPareo
+        from ui.pantallas.pantalla_pareo import PantallaPareo
         p_pareo = self.controller.pantallas.get(PantallaPareo)
         
         if p_pareo:

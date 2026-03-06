@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import socket
-from conexion_db import ConexionDB
+from database.conexion_db import ConexionDB
 
 class VentanaLoginRed(tk.Toplevel):
     def __init__(self, parent, id_torneo, callback_acceso):

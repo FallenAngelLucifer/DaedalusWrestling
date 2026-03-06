@@ -3,8 +3,8 @@ from tkinter import ttk, messagebox
 import calendar
 from tkcalendar import Calendar
 from datetime import datetime
-from conexion_db import ConexionDB
-from utilidades import ComboBuscador, aplicar_formato_fecha, aplicar_formato_cedula
+from database.conexion_db import ConexionDB
+from utils.utilidades import ComboBuscador, aplicar_formato_fecha, aplicar_formato_cedula
 
 class VentanaNuevoRegistro(tk.Toplevel):
     def __init__(self, parent, es_master=True):

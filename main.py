@@ -4,9 +4,9 @@ import socket
 import sys      # NUEVO
 import atexit   # NUEVO
 import signal   # NUEVO
-from pantalla_inscripcion import PantallaInscripcion
-from pantalla_pareo import PantallaPareo
-from conexion_db import ConexionDB
+from ui.pantallas.pantalla_inscripcion import PantallaInscripcion
+from ui.pantallas.pantalla_pareo import PantallaPareo
+from database.conexion_db import ConexionDB
 
 class AplicacionPrincipal(tk.Tk):
     def __init__(self):

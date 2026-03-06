@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>ea140a13-d50a-4ce5-949a-fe821fa88abb</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>DaedalusWrestling.py</StartupFile>
+    <StartupFile>main.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -21,19 +21,29 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="conexion_db.py" />
-    <Compile Include="DaedalusWrestling.py" />
-    <Compile Include="pantalla_inscripcion.py" />
-    <Compile Include="pantalla_pareo.py" />
-    <Compile Include="utilidades.py" />
-    <Compile Include="ventana_combate.py" />
-    <Compile Include="ventana_editar_pelea.py" />
-    <Compile Include="ventana_login_red.py" />
-    <Compile Include="ventana_nuevo_atleta.py" />
-    <Compile Include="ventana_previsualizacion_pdf.py" />
+    <Compile Include="database\conexion_db.py" />
+    <Compile Include="main.py" />
+    <Compile Include="ui\pantallas\pantalla_inscripcion.py" />
+    <Compile Include="ui\pantallas\pantalla_pareo.py" />
+    <Compile Include="utils\utilidades.py" />
+    <Compile Include="ui\ventanas\ventana_combate.py" />
+    <Compile Include="ui\ventanas\ventana_editar_pelea.py" />
+    <Compile Include="ui\ventanas\ventana_login_red.py" />
+    <Compile Include="ui\ventanas\ventana_nuevo_atleta.py" />
+    <Compile Include="ui\ventanas\ventana_previsualizacion_pdf.py" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Libraries.txt" />
+    <Content Include="requirements.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="assets\" />
+    <Folder Include="database\" />
+    <Folder Include="ui\" />
+    <Folder Include="ui\componentes\" />
+    <Folder Include="ui\pantallas\" />
+    <Folder Include="ui\ventanas\" />
+    <Folder Include="ui\pantallas\inscripcion\" />
+    <Folder Include="utils\" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
