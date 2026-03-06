@@ -510,6 +510,28 @@ class PantallaPareo(ttk.Frame):
         self.notebook = ttk.Notebook(self.frame_llaves)
         self.notebook.pack(fill="both", expand=True, padx=(20, 10), pady=10)
 
+        # --- NUEVO: BUSCADOR DE ATLETAS EN LLAVES ---
+        self.frame_buscar_atleta = ttk.Frame(self.notebook.master if hasattr(self, 'notebook') else self) 
+        self.frame_buscar_atleta.pack(fill="x", pady=(0, 5))
+        
+        ttk.Label(self.frame_buscar_atleta, text="🔍 Buscar Atleta:").pack(side="left", padx=5)
+        self.ent_buscar_atleta = ttk.Entry(self.frame_buscar_atleta, width=25)
+        self.ent_buscar_atleta.pack(side="left", padx=5)
+        self.ent_buscar_atleta.bind("<Return>", lambda e: self.ejecutar_busqueda_atleta(1))
+        self.ent_buscar_atleta.bind("<KeyRelease>", self.resetear_busqueda_atleta)
+        
+        self.btn_busq_arriba = ttk.Button(self.frame_buscar_atleta, text="▲", width=3, command=lambda: self.ejecutar_busqueda_atleta(-1))
+        self.btn_busq_arriba.pack(side="left", padx=1)
+        self.btn_busq_abajo = ttk.Button(self.frame_buscar_atleta, text="▼", width=3, command=lambda: self.ejecutar_busqueda_atleta(1))
+        self.btn_busq_abajo.pack(side="left", padx=1)
+        
+        self.lbl_res_busqueda = ttk.Label(self.frame_buscar_atleta, text="", width=10, foreground="#17a2b8", font=("Helvetica", 9, "bold"))
+        self.lbl_res_busqueda.pack(side="left", padx=5)
+        
+        self.resultados_busqueda_atleta = []
+        self.idx_busqueda = -1
+        # ---------------------------------------------
+
         self.tab_cartelera = ttk.Frame(self.notebook, padding=10)
         self.notebook.add(self.tab_cartelera, text="📋 CARTELERA GENERAL")
         self.construir_interfaz_cartelera()
@@ -869,6 +891,12 @@ class PantallaPareo(ttk.Frame):
         contenedor_tabla.pack(side="top", fill="both", expand=True)
         self.tree_cartelera.pack(side="top", fill="both", expand=True)
 
+        # --- CORREGIDO: Botón Buscar en Llave (Anclado al tab correcto) ---
+        frame_btn_cartelera = ttk.Frame(self.tab_cartelera) 
+        frame_btn_cartelera.pack(fill="x", pady=5)
+        self.btn_buscar_en_llave = ttk.Button(frame_btn_cartelera, text="🎯 Buscar en Llave", state="disabled", command=self.buscar_seleccion_en_llave)
+        self.btn_buscar_en_llave.pack(side="right")
+
     def accion_doble_clic_cartelera(self, event):
         """Se dispara con doble clic. Si estamos en historial, no hace nada."""
         if getattr(self, "modo_historial", False):
@@ -876,14 +904,25 @@ class PantallaPareo(ttk.Frame):
         self.iniciar_pelea_desde_cartelera(event)
 
     def accion_clic_cartelera(self, event):
-        """Se dispara con un solo clic. En modo historial, despliega el panel flotante."""
+        """Se dispara al seleccionar o deseleccionar. En modo historial, despliega el panel."""
+        sel = self.tree_cartelera.selection()
+        
+        # Si se deselecciona, apagamos el panel negro y el botón de búsqueda
+        if not sel: 
+            if hasattr(self, "panel_flotante") and getattr(self, "panel_flotante"):
+                getattr(self, "panel_flotante").destroy()
+            if hasattr(self, "btn_buscar_en_llave"): 
+                self.btn_buscar_en_llave.config(state="disabled")
+            return
+
+        # Si hay selección, encendemos el botón de buscar
+        if hasattr(self, "btn_buscar_en_llave"): 
+            self.btn_buscar_en_llave.config(state="normal")
+
         if not getattr(self, "modo_historial", False):
             return 
-        
-        sel = self.tree_cartelera.selection()
-        if not sel: return
+            
         item_id = sel[0]
-        
         llave_key = self.tree_cartelera.item(item_id, "text")
         match_node = getattr(self.tree_cartelera, f"nodo_{item_id}", None)
         
@@ -995,6 +1034,12 @@ class PantallaPareo(ttk.Frame):
         if y_pos + alto_panel > self.tree_cartelera.winfo_height():
             y_pos = bbox[1] - alto_panel
             
+        # --- NUEVO: Botón de Edición si el torneo no ha finalizado ---
+        torneo_terminado = getattr(self.controller, "torneo_finalizado", getattr(self, "torneo_finalizado", False))
+        if not torneo_terminado:
+            tk.Button(self.panel_flotante, text="✏️ Editar Combate", bg="#ffc107", fg="black", font=("Helvetica", 9, "bold"), 
+                      command=lambda: self.abrir_edicion_desde_cartelera(match_node, llave_key)).pack(pady=(10, 5), fill="x", padx=10)
+
         self.panel_flotante.place(x=max(10, x_pos), y=y_pos)
 
     def al_cambiar_pestana(self, event):
@@ -2515,3 +2560,132 @@ class PantallaPareo(ttk.Frame):
             messagebox.showerror("Error", f"No se pudo generar el reporte:\n{e}")
         finally:
             conexion.close()
+
+    # ================= FUNCIONES DE BÚSQUEDA Y NAVEGACIÓN =================
+    def abrir_edicion_desde_cartelera(self, match_node, llave_key):
+        tab_objetivo = None
+        estilo, peso = llave_key.split("-")
+        
+        # Encontrar el tab exacto del estilo
+        for tab in self.notebook.winfo_children():
+            if getattr(tab, "estilo", "") == estilo:
+                tab_objetivo = tab
+                break
+                
+        p_rojo = self.obtener_peleador_real(match_node.get('peleador_rojo'))
+        p_azul = self.obtener_peleador_real(match_node.get('peleador_azul'))
+        
+        from ventana_editar_pelea import VentanaEditarPelea
+        # CORREGIDO: Usamos self.asignar_ganador que es la función que existe en tu código
+        VentanaEditarPelea(self.winfo_toplevel(), match_node, p_rojo, p_azul, tab_objetivo, llave_key, self.asignar_ganador)
+        
+        if hasattr(self, "panel_flotante") and getattr(self, "panel_flotante"):
+            getattr(self, "panel_flotante").destroy()
+
+    def buscar_seleccion_en_llave(self):
+        sel = self.tree_cartelera.selection()
+        if not sel: return
+        item_id = sel[0]
+        llave_key = self.tree_cartelera.item(item_id, "text")
+        match_node = getattr(self.tree_cartelera, f"nodo_{item_id}", None)
+        if not match_node: return
+        self.navegar_a_match(llave_key, match_node['match_id'])
+
+    def resetear_busqueda_atleta(self, event=None):
+        if event and event.keysym in ('Return', 'Up', 'Down', 'Left', 'Right'): return
+        self.resultados_busqueda_atleta = []
+        self.idx_busqueda = -1
+        self.lbl_res_busqueda.config(text="")
+
+    def ejecutar_busqueda_atleta(self, direccion):
+        term = self.ent_buscar_atleta.get().strip().lower()
+        if not term: return
+
+        if not self.resultados_busqueda_atleta:
+            self.resultados_busqueda_atleta = []
+            # CORREGIDO: Buscamos en self.grids_generados
+            for llave_key, grid in self.grids_generados.items():
+                for r in grid:
+                    for match in r:
+                        if isinstance(match, dict) and match.get("tipo") == "combate":
+                            p_rojo = self.obtener_peleador_real(match.get('peleador_rojo'))
+                            p_azul = self.obtener_peleador_real(match.get('peleador_azul'))
+                            
+                            nom_r = p_rojo.get('nombre', '').lower() if p_rojo else ""
+                            nom_a = p_azul.get('nombre', '').lower() if p_azul else ""
+                            
+                            if term in nom_r or term in nom_a:
+                                self.resultados_busqueda_atleta.append({
+                                    'llave_key': llave_key,
+                                    'match_id': match['match_id']
+                                })
+        
+        if not self.resultados_busqueda_atleta:
+            self.lbl_res_busqueda.config(text="0/0")
+            return
+
+        self.idx_busqueda += direccion
+        if self.idx_busqueda >= len(self.resultados_busqueda_atleta):
+            self.idx_busqueda = 0
+        elif self.idx_busqueda < 0:
+            self.idx_busqueda = len(self.resultados_busqueda_atleta) - 1
+
+        self.lbl_res_busqueda.config(text=f"{self.idx_busqueda + 1}/{len(self.resultados_busqueda_atleta)}")
+        res = self.resultados_busqueda_atleta[self.idx_busqueda]
+        self.navegar_a_match(res['llave_key'], res['match_id'])
+
+    def navegar_a_match(self, llave_key, match_id):
+        estilo, peso = llave_key.split("-")
+        tab_objetivo = None
+        
+        # 1. Encontrar la pestaña de estilo y forzar el peso
+        for tab in self.notebook.winfo_children():
+            if getattr(tab, "estilo", "") == estilo:
+                tab_objetivo = tab
+                self.notebook.select(tab)
+                tab.cmb_peso.set(peso)
+                self.procesar_y_dibujar(tab)
+                break
+                
+        if not tab_objetivo: return
+
+        canvas = tab_objetivo.canvas
+        if not canvas: return
+
+        # 2. Encontrar el nodo del combate en la matriz
+        y_target = 0
+        match_encontrado = None
+        for r in self.grids_generados.get(llave_key, []):
+            for node in r:
+                if isinstance(node, dict) and node.get("match_id") == match_id:
+                    match_encontrado = node
+                    break
+            if match_encontrado: break
+        
+        # 3. Leer el Canvas para hacer el scroll
+        if match_encontrado:
+            p_rojo = self.obtener_peleador_real(match_encontrado.get('peleador_rojo'))
+            for item in canvas.find_all():
+                if canvas.type(item) == "text":
+                    texto = canvas.itemcget(item, "text").lower()
+                    nom_r = p_rojo.get('nombre', '').lower() if p_rojo else ""
+                    if (nom_r and nom_r in texto) or str(match_id).lower() in texto:
+                        coords = canvas.coords(item)
+                        if coords:
+                            y_target = coords[1]
+                            break
+
+        # 4. Ajustar el Scroll
+        if y_target > 0:
+            bbox = canvas.bbox("all")
+            if bbox:
+                total_h = bbox[3] - bbox[1]
+                if total_h > 0:
+                    fraccion = max(0.0, (y_target - 150) / total_h)
+                    canvas.yview_moveto(fraccion)
+                    
+        # 5. Efecto de destello visual
+        rect_flash = canvas.create_rectangle(20, max(0, y_target - 60), 800, y_target + 60, fill="#ffff00", stipple="gray50", outline="red", width=2)
+        def quitar_destello():
+            if canvas.winfo_exists(): canvas.delete(rect_flash)
+        self.after(1500, quitar_destello)

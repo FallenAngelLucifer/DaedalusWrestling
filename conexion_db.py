@@ -140,23 +140,29 @@ class ConexionDB:
         return self._ejecutar_select(query)
 
     def obtener_lista_torneos_debug(self):
-        query = """
-            SELECT t.id, t.nombre, to_char(t.fecha_inicio, 'DD/MM/YYYY') as fecha, c.nombre as categoria
-            FROM torneo t
-            JOIN categoria_edad c ON t.id_categoria_edad = c.id
-            ORDER BY t.id DESC
-        """
+        """Devuelve la lista de torneos con sus estados clave para cargar."""
         conexion = self.conectar()
         if not conexion: return []
         try:
+            # Importante usar RealDictCursor si no lo has importado: from psycopg2.extras import RealDictCursor
+            from psycopg2.extras import RealDictCursor
             with conexion.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(query)
+                cur.execute("""
+                    SELECT t.id, t.nombre, TO_CHAR(t.fecha_inicio, 'DD/MM/YYYY') as fecha, 
+                           c.nombre as categoria, t.fecha_fin,
+                           (SELECT COUNT(*) FROM conexiones_torneo ct 
+                            WHERE ct.id_torneo = t.id AND ct.es_master = TRUE 
+                            AND CURRENT_TIMESTAMP - ct.ultima_actividad <= INTERVAL '5 seconds') > 0 as tiene_master
+                    FROM torneo t
+                    LEFT JOIN categoria_edad c ON t.id_categoria_edad = c.id
+                    ORDER BY t.id DESC;
+                """)
                 return cur.fetchall()
         except Exception as e:
-            print("Error al obtener lista de torneos:", e)
+            print(f"Error obteniendo torneos debug: {e}")
             return []
         finally:
-            conexion.close()
+            if conexion: conexion.close()
 
     def obtener_torneo_completo_debug(self, id_torneo):
         query_torneo = """

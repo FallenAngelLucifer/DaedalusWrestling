@@ -26,7 +26,33 @@ class VentanaEditarPelea(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
 
-        self.oficiales_db = self.db.obtener_oficiales()
+        # --- NUEVO: FILTRO Y CARGA DE ÁRBITROS ---
+        oficiales_todos = self.db.obtener_oficiales()
+        ganador_data = self.match_node.get("ganador", {})
+        
+        self.id_arb_orig = ganador_data.get("id_arbitro")
+        self.id_jue_orig = ganador_data.get("id_juez")
+        self.id_jefe_orig = ganador_data.get("id_jefe_tapiz")
+        
+        # Identificar quién es el Jefe de Tapiz original (Intocable)
+        oficial_jefe = next((o for o in oficiales_todos if o['id'] == self.id_jefe_orig), None)
+        self.nombre_jefe_tapiz = f"{oficial_jefe['apellidos']}, {oficial_jefe['nombre']}" if oficial_jefe else "Desconocido"
+
+        # Buscar ocupados en la red
+        id_torneo = getattr(parent, 'id_torneo', None) or getattr(parent.controller, 'torneo_debug_id', None)
+        oficiales_ocupados = set()
+        if id_torneo:
+            conexiones = self.db.obtener_conexiones_torneo(id_torneo)
+            for c in conexiones:
+                if c.get('id_oficial'):
+                    oficiales_ocupados.add(c['id_oficial'])
+
+        # Filtrar: Mostrar solo los disponibles + los que ya estaban asignados a este combate
+        self.oficiales_db = []
+        for o in oficiales_todos:
+            if o['id'] not in oficiales_ocupados or o['id'] in (self.id_arb_orig, self.id_jue_orig):
+                self.oficiales_db.append(o)
+
         self.nombres_oficiales = [f"{o['apellidos']}, {o['nombre']}" for o in self.oficiales_db]
         
         self.tipos_victoria = [
@@ -64,7 +90,9 @@ class VentanaEditarPelea(tk.Toplevel):
         self.crear_interfaz()
 
     def crear_interfaz(self):
-        tk.Label(self, text="HOJA DE PUNTUACIÓN OFICIAL", font=("Helvetica", 14, "bold"), bg="#2a2a2a", fg="white").pack(fill="x")
+        # --- NUEVO: MOSTRAR TAPIZ EN LA CABECERA ---
+        tapiz_str = self.match_node.get("tapiz", "No Registrado")
+        tk.Label(self, text=f"HOJA DE PUNTUACIÓN OFICIAL - {tapiz_str.upper()}", font=("Helvetica", 14, "bold"), bg="#2a2a2a", fg="white").pack(fill="x")
 
         # --- SECCIÓN: CUERPO ARBITRAL ---
         frame_arbitros = ttk.LabelFrame(self, text="Oficiales de Arbitraje (Asignados en el Tapiz)", padding=10)
@@ -78,15 +106,13 @@ class VentanaEditarPelea(tk.Toplevel):
         self.cmb_juez = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
         self.cmb_juez.grid(row=1, column=1, padx=10, pady=5)
 
+        # --- NUEVO: JEFE DE TAPIZ INTOCABLE ---
         ttk.Label(frame_arbitros, text="Mat Chairman / Jefe de Tapiz:").grid(row=2, column=0, sticky="w", pady=5)
-        self.cmb_jefe = ComboBuscador(frame_arbitros, values=self.nombres_oficiales, state="readonly", width=30)
-        self.cmb_jefe.grid(row=2, column=1, padx=10, pady=5)
+        ttk.Label(frame_arbitros, text=f"⭐ {self.nombre_jefe_tapiz}", font=("Helvetica", 10, "bold"), foreground="#17a2b8").grid(row=2, column=1, sticky="w", padx=10, pady=5)
 
         aplicar_autocompletado(self.cmb_arbitro, self.nombres_oficiales)
         aplicar_autocompletado(self.cmb_juez, self.nombres_oficiales)
-        aplicar_autocompletado(self.cmb_jefe, self.nombres_oficiales)
 
-        ganador_data = self.match_node.get("ganador", {})
         def set_combo(cmb, id_oficial):
             if id_oficial:
                 for i, of in enumerate(self.oficiales_db):
@@ -94,9 +120,14 @@ class VentanaEditarPelea(tk.Toplevel):
                         cmb.current(i)
                         break
 
-        set_combo(self.cmb_arbitro, ganador_data.get("id_arbitro"))
-        set_combo(self.cmb_juez, ganador_data.get("id_juez"))
-        set_combo(self.cmb_jefe, ganador_data.get("id_jefe_tapiz"))
+        set_combo(self.cmb_arbitro, self.id_arb_orig)
+        set_combo(self.cmb_juez, self.id_jue_orig)
+        
+        # --- NUEVO: PREPARAR INTERCAMBIO ---
+        self.prev_arbitro_val = self.cmb_arbitro.get()
+        self.prev_juez_val = self.cmb_juez.get()
+        self.cmb_arbitro.bind("<<ComboboxSelected>>", self.validar_intercambio_arbitros)
+        self.cmb_juez.bind("<<ComboboxSelected>>", self.validar_intercambio_arbitros)
 
         # --- SECCIÓN: RESULTADOS Y PUNTOS DESGLOSADOS ---
         frame_resultados = ttk.LabelFrame(self, text="Resultados del Combate", padding=10)
@@ -122,12 +153,18 @@ class VentanaEditarPelea(tk.Toplevel):
         ttk.Label(frame_resultados, text="Ganador (Winner):", font=("Helvetica", 10, "bold")).grid(row=3, column=0, sticky="w", pady=(15, 5))
         self.cmb_ganador = ComboBuscador(frame_resultados, values=[self.p_rojo['nombre'], self.p_azul['nombre']], state="readonly", width=25)
         self.cmb_ganador.grid(row=3, column=1, columnspan=2, sticky="w", pady=(15, 5))
-        if ganador_data: self.cmb_ganador.set(ganador_data["nombre"])
+        
+        # --- NUEVO: Extraer los datos del ganador para esta función ---
+        ganador_data = self.match_node.get("ganador", {})
+        
+        if ganador_data: self.cmb_ganador.set(ganador_data.get("nombre", ""))
 
         ttk.Label(frame_resultados, text="Tipo de Victoria:", font=("Helvetica", 10, "bold")).grid(row=4, column=0, sticky="w", pady=5)
         self.cmb_victoria = ComboBuscador(frame_resultados, values=self.tipos_victoria, state="readonly", width=50)
         self.cmb_victoria.grid(row=4, column=1, columnspan=2, sticky="w", pady=5)
-        if ganador_data and "motivo_victoria" in ganador_data: self.cmb_victoria.set(ganador_data["motivo_victoria"])
+        
+        if ganador_data and "motivo_victoria" in ganador_data: 
+            self.cmb_victoria.set(ganador_data["motivo_victoria"])
 
         aplicar_autocompletado(self.cmb_ganador, [self.p_rojo['nombre'], self.p_azul['nombre']])
         aplicar_autocompletado(self.cmb_victoria, self.tipos_victoria)
@@ -136,18 +173,52 @@ class VentanaEditarPelea(tk.Toplevel):
         botones_frame = tk.Frame(self)
         botones_frame.pack(pady=15)
 
+        # NUEVO BOTÓN CANCELAR
+        tk.Button(botones_frame, text="CANCELAR", font=("Helvetica", 10, "bold"), bg="#dc3545", fg="white", command=self.destroy).pack(side="left", padx=10, ipadx=10, ipady=5)
+        
         tk.Button(botones_frame, text="GUARDAR Y CONFIRMAR EDICIÓN", font=("Helvetica", 10, "bold"), bg="#28a745", fg="white", command=self.guardar_datos).pack(side="left", padx=10, ipadx=10, ipady=5)
+
+    def validar_intercambio_arbitros(self, event):
+        """Si selecciona un árbitro que ya está en el otro cargo, los intercambia automáticamente."""
+        val_arb = self.cmb_arbitro.get()
+        val_juez = self.cmb_juez.get()
+        
+        if val_arb == val_juez and val_arb != "":
+            if event.widget == self.cmb_arbitro:
+                self.cmb_juez.set(getattr(self, 'prev_arbitro_val', ''))
+            else:
+                self.cmb_arbitro.set(getattr(self, 'prev_juez_val', ''))
+                
+        self.prev_arbitro_val = self.cmb_arbitro.get()
+        self.prev_juez_val = self.cmb_juez.get()
 
     def guardar_datos(self):
         id_arb = self.oficiales_db[self.cmb_arbitro.current()]['id'] if self.cmb_arbitro.current() != -1 else None
         id_jue = self.oficiales_db[self.cmb_juez.current()]['id'] if self.cmb_juez.current() != -1 else None
-        id_jef = self.oficiales_db[self.cmb_jefe.current()]['id'] if self.cmb_jefe.current() != -1 else None
+        id_jef = self.id_jefe_orig # <-- NUEVO: El Jefe de Tapiz no cambia
         
-        if not self.cmb_ganador.get(): return messagebox.showwarning("Falta Ganador", "Debe seleccionar quién ganó el combate.")
+        if not self.cmb_ganador.get(): 
+            return messagebox.showwarning("Falta Ganador", "Debe seleccionar quién ganó el combate.")
             
-        ganador_dict = self.p_rojo if self.cmb_ganador.get() == self.p_rojo['nombre'] else self.p_azul
-        motivo = self.cmb_victoria.get()
+        ganador_data = self.match_node.get("ganador", {})
+        ganador_previo = ganador_data.get("nombre")
+        motivo_previo = ganador_data.get("motivo_victoria", "")
+        
+        ganador_nuevo = self.cmb_ganador.get()
+        motivo_nuevo = self.cmb_victoria.get()
+
+        # --- NUEVO: ADVERTENCIA CAMBIO DE GANADOR ---
+        if ganador_previo and ganador_nuevo != ganador_previo:
+            if not messagebox.askyesno("Cambio de Ganador", f"Está a punto de cambiar al ganador de '{ganador_previo}' a '{ganador_nuevo}'.\n\n¿Está completamente seguro?"):
+                return
+
+        # --- NUEVO: ADVERTENCIA DESCALIFICACIÓN (DSQ) ---
+        if "DSQ" in motivo_nuevo and "DSQ" not in str(motivo_previo):
+            if not messagebox.askyesno("Descalificación Irreversible", "⚠️ ADVERTENCIA DE SEGURIDAD\n\nHa seleccionado una descalificación (DSQ).\n\nLos atletas descalificados serán eliminados del torneo de forma permanente y NO podrán ser reintegrados a la competencia.\n\n¿Desea aplicar esta descalificación?"):
+                return
+            
+        ganador_dict = self.p_rojo if ganador_nuevo == self.p_rojo['nombre'] else self.p_azul
         totales = {'rojo': self.total_r, 'azul': self.total_a}
 
-        self.callback_actualizar(self.match_node, ganador_dict, motivo, self.tab, self.llave_key, id_arb, id_jue, id_jef, None, totales)
+        self.callback_actualizar(self.match_node, ganador_dict, motivo_nuevo, self.tab, self.llave_key, id_arb, id_jue, id_jef, None, totales)
         self.destroy()

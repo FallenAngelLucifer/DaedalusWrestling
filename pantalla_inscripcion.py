@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from conexion_db import ConexionDB
 from ventana_nuevo_atleta import VentanaNuevoRegistro
-from utilidades import aplicar_autocompletado, ComboBuscador, aplicar_deseleccion_tabla
+from utilidades import aplicar_autocompletado, ComboBuscador, aplicar_deseleccion_tabla, aplicar_formato_fecha
 
 class PantallaInscripcion(ttk.Frame):
     def __init__(self, parent, controller):
@@ -308,6 +308,7 @@ class PantallaInscripcion(ttk.Frame):
         
         self.tabla.pack(side="top", fill="both", expand=True)
         self.tabla.tag_configure("dsq", foreground="#dc3545")
+        self.tabla.tag_configure("sync_red", background="#d1ecf1", foreground="#0c5460")
 
         btn_box = ttk.Frame(tabla_frame)
         btn_box.pack(fill="x", pady=5)
@@ -345,10 +346,8 @@ class PantallaInscripcion(ttk.Frame):
             (getattr(self, 'cmb_tor_ciudad', None), estado_combo),
             (getattr(self, 'cmb_tor_tapices', None), estado_combo),
             (getattr(self, 'ent_fecha_inicio', None), estado_normal),
-            (getattr(self, 'ent_fecha_fin', None), estado_normal),
-            (getattr(self, 'chk_libre', None), estado_normal),
-            (getattr(self, 'chk_greco', None), estado_normal),
-            (getattr(self, 'chk_femenina', None), estado_normal)
+            (getattr(self, 'ent_fecha_fin', None), estado_normal)
+            # --- CORRECCIÓN: Se eliminaron los chk_libre, chk_greco y chk_femenina de aquí ---
         ]
         
         for widget, est in controles:
@@ -367,7 +366,6 @@ class PantallaInscripcion(ttk.Frame):
             if hasattr(self, 'btn_confirmar_torneo'):
                 if not self.btn_confirmar_torneo.winfo_ismapped():
                     self.btn_confirmar_torneo.pack(side="left", padx=5, before=self.btn_nuevo_limpiar)
-                # El Máster recupera su estado normal
                 self.btn_confirmar_torneo.config(state="normal")
 
     def gestionar_estado_botones_red(self, event=None):
@@ -497,18 +495,18 @@ class PantallaInscripcion(ttk.Frame):
     def actualizar_categoria_dinamica(self, *args):
         # --- NUEVO: REGLA DE NO DESELECCIONAR TODOS ---
         if hasattr(self, 'cmb_atleta'):
-            idx = self.cmb_atleta.current()
-            if idx != -1:
-                atleta = self.atletas_filtrados_objetos[idx]
-                # Si el usuario intentó desmarcar el último estilo activo:
+            texto_atleta = self.cmb_atleta.get().strip()
+            atleta = next((a for a in getattr(self, "atletas_filtrados_objetos", []) if f"{a.get('apellidos', '')}, {a.get('nombre', '')} (ID: {a.get('id', '')})" == texto_atleta), None)
+            
+            if atleta:
                 if not (self.var_estilo_libre.get() or self.var_estilo_greco.get() or self.var_estilo_femenina.get()):
-                    # Forzamos la reactivación del estilo principal según su sexo
-                    if atleta['sexo'] == 'M': self.var_estilo_libre.set(True)
+                    if str(atleta.get('sexo', '')).upper() == 'M': self.var_estilo_libre.set(True)
                     else: self.var_estilo_femenina.set(True)
 
-        peso_str = self.var_peso.get().strip()
+        peso_str = getattr(self, 'var_peso', tk.StringVar()).get().strip()
         if not peso_str:
-            self.lbl_cat_dinamica.config(text="Categoría: --", foreground="gray")
+            if hasattr(self, 'lbl_cat_dinamica'):
+                self.lbl_cat_dinamica.config(text="Categoría: --", foreground="gray")
             return
             
         try: peso_dado = float(peso_str)
@@ -520,27 +518,27 @@ class PantallaInscripcion(ttk.Frame):
             self.lbl_cat_dinamica.config(text="Peso irreal", foreground="red")
             return
 
-        if not self.categoria_confirmada:
+        if not getattr(self, 'categoria_confirmada', None):
             self.lbl_cat_dinamica.config(text="Confirme torneo primero", foreground="orange")
             return
 
         estilos_sel = []
-        if self.var_estilo_libre.get(): estilos_sel.append(("Libre", 1))
-        if self.var_estilo_greco.get(): estilos_sel.append(("Greco", 2))
-        if self.var_estilo_femenina.get(): estilos_sel.append(("Fem", 3))
+        if getattr(self, 'var_estilo_libre', tk.BooleanVar()).get(): estilos_sel.append(("Libre", 1))
+        if getattr(self, 'var_estilo_greco', tk.BooleanVar()).get(): estilos_sel.append(("Greco", 2))
+        if getattr(self, 'var_estilo_femenina', tk.BooleanVar()).get(): estilos_sel.append(("Fem", 3))
 
         if not estilos_sel:
             self.lbl_cat_dinamica.config(text="Seleccione un estilo", foreground="gray")
             return
 
-        id_cat_torneo = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
+        id_cat_torneo = next((c['id'] for c in getattr(self, 'categorias_db', []) if str(c['nombre']) == str(self.categoria_confirmada)), None)
         
         cats_encontradas = []
         for nombre_estilo, id_estilo in estilos_sel:
             bracket_encontrado = None
-            for p in self.pesos_oficiales_db:
-                if p['id_categoria_edad'] == id_cat_torneo and p['id_estilo_lucha'] == id_estilo:
-                    if p['peso_minimo'] <= peso_dado <= p['peso_maximo']:
+            for p in getattr(self, 'pesos_oficiales_db', []):
+                if str(p['id_categoria_edad']) == str(id_cat_torneo) and str(p['id_estilo_lucha']) == str(id_estilo):
+                    if float(p['peso_minimo']) <= peso_dado <= float(p['peso_maximo']):
                         bracket_encontrado = p
                         break
             if bracket_encontrado:
@@ -550,7 +548,8 @@ class PantallaInscripcion(ttk.Frame):
         
         texto_final = " | ".join(cats_encontradas)
         color = "red" if "Fuera" in texto_final else "#17a2b8"
-        self.lbl_cat_dinamica.config(text=f"Asignación: {texto_final}", foreground=color)
+        if hasattr(self, 'lbl_cat_dinamica'):
+            self.lbl_cat_dinamica.config(text=f"Asignación: {texto_final}", foreground=color)
 
     def al_cambiar_filtro_estilo(self, event=None):
         """Manejador para cuando el usuario cambia la selección de estilos."""
@@ -571,16 +570,25 @@ class PantallaInscripcion(ttk.Frame):
             self.cargar_para_editar()
 
     def actualizar_btn_nuevo_limpiar(self):
-        """Mantiene el botón siempre visible y con el texto correcto."""
+        """Mantiene el botón siempre visible y con el texto/estado correcto según la fase."""
+        if not hasattr(self, 'btn_nuevo_limpiar'): return
+        
+        # Asegurarse de que el botón esté visible en la interfaz
         if not self.btn_nuevo_limpiar.winfo_ismapped():
             self.btn_nuevo_limpiar.pack(side="left", padx=5)
 
+        # EVALUACIÓN DE REGLAS:
         if getattr(self, "torneo_debug_id", None) is not None:
-            self.btn_nuevo_limpiar.config(text="Salir / Nuevo Torneo")
-        elif self.ent_tor_nombre.get().strip() or self.categoria_confirmada:
-            self.btn_nuevo_limpiar.config(text="Limpiar Torneo")
+            # Reglas 2, 3 y 4: Torneo en Base de Datos (Guardado, Cargado o en Edición Post-Guardado)
+            self.btn_nuevo_limpiar.config(text="Nuevo Torneo (Salir)", state="normal")
+            
+        elif getattr(self, "categoria_confirmada", None) is not None:
+            # Regla 1: Torneo Nuevo con datos confirmados localmente (Aún no subido a la BD)
+            self.btn_nuevo_limpiar.config(text="Limpiar Torneo", state="normal")
+            
         else:
-            self.btn_nuevo_limpiar.config(text="Nuevo Torneo")
+            # Regla 5: Estado inicial, vacío o recién clickeado en "Nuevo/Limpiar"
+            self.btn_nuevo_limpiar.config(text="Limpiar Torneo", state="disabled")
 
     def resetear_torneo(self, forzar=False):
         """Borra la memoria y resetea la pantalla a su estado inicial de fábrica."""
@@ -841,13 +849,23 @@ class PantallaInscripcion(ttk.Frame):
             self.chk_libre.config(state="disabled")
             self.chk_greco.config(state="disabled")
             self.chk_femenina.config(state="disabled")
+        else:
+            # Forzamos la validación para que los estilos nazcan apagados
+            self.al_seleccionar_atleta()
 
     def gestionar_bloqueo_torneo(self):
         if self.btn_confirmar_torneo.cget("text") == "Modificar Torneo":
             self.ent_tor_nombre.config(state="normal")
             self.ent_tor_lugar.config(state="normal")
             self.cmb_tor_ciudad.config(state="normal")
-            self.cmb_categoria.config(state="normal")
+            
+            # --- NUEVO: BLOQUEO ABSOLUTO DE CATEGORÍA ---
+            # Si hay al menos un peso bloqueado/confirmado, la categoría no se puede tocar
+            if getattr(self, "pesos_bloqueados_ids", set()):
+                self.cmb_categoria.config(state="disabled")
+            else:
+                self.cmb_categoria.config(state="normal")
+                
             self.btn_confirmar_torneo.config(text="Guardar Cambios")
             self.btn_cancelar_torneo.pack(side="left", padx=5)
             self.cambiar_estado_inscripcion("disabled")
@@ -863,6 +881,11 @@ class PantallaInscripcion(ttk.Frame):
             return messagebox.showwarning("Incompleto", "Llene nombre, lugar, ciudad y categoría.")
 
         if self.categoria_confirmada is not None and self.categoria_confirmada != cat:
+            # --- NUEVO: Doble validación de seguridad contra cambios ilícitos ---
+            if getattr(self, "pesos_bloqueados_ids", set()):
+                self.cmb_categoria.set(self.categoria_confirmada)
+                return messagebox.showwarning("Bloqueado", "No se puede cambiar la categoría porque ya existen llaves en curso.")
+                
             if self.inscripciones_memoria:
                 respuesta = messagebox.askyesno("Cambio de Categoría", "Cambiar la categoría borrará las inscripciones actuales. ¿Desea continuar?")
                 if not respuesta:
@@ -895,6 +918,8 @@ class PantallaInscripcion(ttk.Frame):
         self.btn_confirmar_red.config(state="normal")
         self.btn_eliminar_red.config(state="normal")
         self.btn_intercambiar_tapiz.config(state="normal")
+        
+        # --- NUEVO: RECARGAMOS LOS ATLETAS AL CONFIRMAR LA CATEGORÍA ---
         self.filtrar_atletas_por_edad()
 
         self.actualizar_btn_nuevo_limpiar()
@@ -941,14 +966,10 @@ class PantallaInscripcion(ttk.Frame):
         valores = self.tabla.item(item_sel[0], "values")
         self.id_atleta_editando = int(valores[0])
 
-        # Buscar el índice del atleta en el combobox original
+        # Asignar directamente el valor de texto
         atleta_str = f"{valores[2]} (ID: {self.id_atleta_editando})"
-        try:
-            idx = list(self.cmb_atleta['values']).index(atleta_str)
-            self.cmb_atleta.current(idx)
-            self.al_seleccionar_atleta(None)
-        except ValueError:
-            pass
+        self.cmb_atleta.set(atleta_str)
+        self.al_seleccionar_atleta(None)
         
         self.var_peso.set(valores[6])
 
@@ -971,15 +992,20 @@ class PantallaInscripcion(ttk.Frame):
 
     def agregar_a_memoria(self):
         idx = self.cmb_atleta.current()
-        peso_str = self.ent_peso.get().strip()
         if idx == -1 or not peso_str: return messagebox.showwarning("Incompleto", "Seleccione atleta y peso.")
+        texto_atleta = self.cmb_atleta.get().strip()
+        peso_str = self.ent_peso.get().strip()
+        
+        if not texto_atleta or not peso_str: return messagebox.showwarning("Incompleto", "Seleccione atleta y peso.")
         try: peso_dado = float(peso_str)
         except ValueError: return messagebox.showwarning("Error", "Peso con formato inválido.")
 
         if peso_dado <= 20:
             return messagebox.showwarning("Error de Peso", "El peso debe ser mayor a 20 kg.")
 
-        atleta = self.atletas_filtrados_objetos[idx]
+        atleta = next((a for a in getattr(self, "atletas_filtrados_objetos", []) if f"{a['apellidos']}, {a['nombre']} (ID: {a['id']})" == texto_atleta), None)
+        if not atleta: return messagebox.showwarning("Error", "Seleccione un atleta válido de la lista.")
+
         estilos_sel = []
         if self.var_estilo_libre.get(): estilos_sel.append(("Libre", 1))
         if self.var_estilo_greco.get(): estilos_sel.append(("Grecorromana", 2))
@@ -1106,9 +1132,15 @@ class PantallaInscripcion(ttk.Frame):
                 if tipo == "Club" and term not in club.lower(): continue
                 if tipo == "Ciudad" and term not in ciudad.lower(): continue
 
-            # --- NUEVO: Etiquetas visuales para atletas descalificados ---
+            # --- NUEVO: Etiquetas visuales para atletas descalificados y de RED ---
             is_dsq = id_atl in getattr(self, "atletas_descalificados_ids", set())
-            tags = ("dsq",) if is_dsq else ()
+            tags_list = ["dsq"] if is_dsq else []
+            
+            if ins.get("de_red", False):
+                nombre_completo = f"🌐 [RED] {nombre_completo}"
+                tags_list.append("sync_red")
+                
+            tags = tuple(tags_list)
 
             fila_valores = (id_atl, 0, nombre_completo, info['sexo'], club, ciudad, ins['peso'], ins['peso_oficial'], " + ".join(ins['estilos']))
             
@@ -1149,96 +1181,115 @@ class PantallaInscripcion(ttk.Frame):
         aplicar_autocompletado(self.cmb_tor_ciudad, sorted(list(self.map_ciudades_torneo.keys())))
 
     def filtrar_atletas_por_edad(self):
-        idx_cat = self.cmb_categoria.current()
-        if idx_cat == -1: return
+        # 1. DESCARGA EN VIVO: Siempre usar datos frescos de la BD
+        if hasattr(self, 'db'):
+            self.atletas_db = self.db.obtener_atletas()
 
-        cat = self.categorias_db[idx_cat]
+        # Usar la variable de memoria porque el combobox bloqueado devuelve vacío
+        nombre_cat = getattr(self, 'categoria_confirmada', None)
+        if not nombre_cat:
+            nombre_cat = self.cmb_categoria.get().strip()
+            
+        if not nombre_cat: 
+            return
+
+        # 2. MATCH TOLERANTE: Ignora mayúsculas y espacios extra
+        cat = next((c for c in getattr(self, 'categorias_db', []) if str(c.get('nombre', '')).strip().lower() == nombre_cat.lower()), None)
+        
+        # Si no hay categoría válida, la lista queda estrictamente vacía
+        if not cat: 
+            if hasattr(self, 'cmb_atleta'):
+                self.cmb_atleta.config(values=[])
+                self.cmb_atleta.set('')
+            return
+
         anio_torneo = datetime.now().year
         self.atletas_filtrados_objetos = []
         atletas_permitidos = []
 
-        # --- NUEVA REGLA DE BLOQUEO POR ESTILO (Inteligente) ---
-        # 1. Obtenemos todas las divisiones que actualmente tienen al menos un atleta
-        divs_con_atletas = set()
-        for ins in self.inscripciones_memoria:
-            for div_id in ins['ids_divisiones']:
-                divs_con_atletas.add(div_id)
+        # 3. TOLERANCIA DE COLUMNAS
+        try: e_min = int(cat.get('edad_minima', cat.get('edad_min', 0)))
+        except: e_min = 0
+        try: e_max = int(cat.get('edad_maxima', cat.get('edad_max', 99)))
+        except: e_max = 99
 
-        estilos_abiertos = set()
-        estilos_validos = set(p['id_estilo_lucha'] for p in self.pesos_oficiales_db if p['id_categoria_edad'] == cat['id'])
-
-        # 2. Evaluamos el estado real de cada estilo
-        for id_estilo in estilos_validos:
-            divs_estilo = [p['id'] for p in self.pesos_oficiales_db if p['id_categoria_edad'] == cat['id'] and p['id_estilo_lucha'] == id_estilo]
+        import re
+        for atleta in getattr(self, 'atletas_db', []):
+            fecha_nac = atleta.get('fecha_nacimiento', '')
+            anio_nac = anio_torneo 
             
-            # Filtramos solo las divisiones de este estilo que tienen atletas
-            divs_activas = [d for d in divs_estilo if d in divs_con_atletas]
-
-            if not divs_activas:
-                # Si el estilo está completamente vacío (0 atletas), lo dejamos abierto para nuevos ingresos
-                estilos_abiertos.add(id_estilo)
+            # EXTRACCIÓN CON EXPRESIÓN REGULAR
+            if hasattr(fecha_nac, 'year'):
+                anio_nac = fecha_nac.year
             else:
-                # Si el estilo ya tiene atletas, verificamos si queda ALGUNA llave sin confirmar/bloquear
-                unblocked_activas = [d for d in divs_activas if d not in getattr(self, "pesos_bloqueados_ids", set())]
-                if unblocked_activas:
-                    estilos_abiertos.add(id_estilo)
-                    
-        # 3. Mapeo de validación: Libre (1), Greco (2), Femenina (3)
-        allow_m = 1 in estilos_abiertos or 2 in estilos_abiertos
-        allow_f = 3 in estilos_abiertos
-
-        # 4. Filtrado final del Combobox
-        for atleta in self.atletas_db:
-            # Filtrar por sexo según la disponibilidad del estilo
-            if atleta['sexo'] == 'M' and not allow_m: continue
-            if atleta['sexo'] == 'F' and not allow_f: continue
+                match = re.search(r'\d{4}', str(fecha_nac))
+                if match:
+                    anio_nac = int(match.group())
             
-            edad_uww = anio_torneo - atleta['fecha_nacimiento'].year
-            if cat['edad_minima'] <= edad_uww <= cat['edad_maxima']:
-                atletas_permitidos.append(f"{atleta['apellidos']}, {atleta['nombre']} (ID: {atleta['id']})")
+            edad_uww = anio_torneo - anio_nac
+            
+            # Filtro ESTRICTO de Edad UWW
+            if e_min <= edad_uww <= e_max:
+                texto_combo = f"{atleta.get('apellidos', '')}, {atleta.get('nombre', '')} (ID: {atleta.get('id', '')})"
+                atletas_permitidos.append(texto_combo)
                 self.atletas_filtrados_objetos.append(atleta)
 
-        aplicar_autocompletado(self.cmb_atleta, atletas_permitidos)
-        self.cmb_atleta.set('')
+        # 4. INYECCIÓN AL COMBOBOX
+        if hasattr(self, 'cmb_atleta'):
+            self.cmb_atleta.config(values=atletas_permitidos)
+            try:
+                aplicar_autocompletado(self.cmb_atleta, atletas_permitidos)
+            except:
+                pass
+            self.cmb_atleta.set('')
 
     def al_seleccionar_atleta(self, event=None):
         if not hasattr(self, 'cmb_atleta'): return
         
-        idx = self.cmb_atleta.current()
+        texto_atleta = self.cmb_atleta.get().strip()
         
-        # SI ESTÁ VACÍO O SE BORRÓ EL NOMBRE: Desmarcar y Bloquear Todo
-        if idx == -1: 
+        # Función interna rápida para apagar y bloquear
+        def forzar_bloqueo():
             self.var_estilo_libre.set(False)
             self.var_estilo_greco.set(False)
             self.var_estilo_femenina.set(False)
-            self.chk_libre.config(state="disabled")
-            self.chk_greco.config(state="disabled")
-            self.chk_femenina.config(state="disabled")
+            if hasattr(self, 'chk_libre'): self.chk_libre.config(state="disabled")
+            if hasattr(self, 'chk_greco'): self.chk_greco.config(state="disabled")
+            if hasattr(self, 'chk_femenina'): self.chk_femenina.config(state="disabled")
             self.actualizar_categoria_dinamica()
-            return
+        
+        if not texto_atleta: 
+            return forzar_bloqueo()
             
-        atleta = self.atletas_filtrados_objetos[idx]
+        atleta = next((a for a in getattr(self, "atletas_filtrados_objetos", []) if f"{a.get('apellidos', '')}, {a.get('nombre', '')} (ID: {a.get('id', '')})" == texto_atleta), None)
+        
+        if not atleta: 
+            return forzar_bloqueo()
 
         self.var_estilo_libre.set(False)
         self.var_estilo_greco.set(False)
         self.var_estilo_femenina.set(False)
 
-        # SI HAY ALGUIEN SELECCIONADO: Habilitar según su sexo
-        if atleta['sexo'] == 'M':
-            self.chk_libre.config(state="normal")
-            self.chk_greco.config(state="normal")
-            self.chk_femenina.config(state="disabled")
+        sexo = str(atleta.get('sexo', '')).upper()
+        if sexo == 'M':
+            if hasattr(self, 'chk_libre'): self.chk_libre.config(state="normal")
+            if hasattr(self, 'chk_greco'): self.chk_greco.config(state="normal")
+            if hasattr(self, 'chk_femenina'): self.chk_femenina.config(state="disabled")
             self.var_estilo_libre.set(True)
         else:
-            self.chk_libre.config(state="disabled")
-            self.chk_greco.config(state="disabled")
-            self.chk_femenina.config(state="normal")
+            if hasattr(self, 'chk_libre'): self.chk_libre.config(state="disabled")
+            if hasattr(self, 'chk_greco'): self.chk_greco.config(state="disabled")
+            if hasattr(self, 'chk_femenina'): self.chk_femenina.config(state="normal")
             self.var_estilo_femenina.set(True)
 
         self.actualizar_categoria_dinamica()
 
     def abrir_ventana_nuevo(self):
-        VentanaNuevoRegistro(self)
+        # Saber si soy un invitado
+        es_master = getattr(self.controller, 'es_master', True)
+        soy_guest = getattr(self, "torneo_debug_id", None) and not es_master
+        
+        VentanaNuevoRegistro(self, es_master=not soy_guest)
 
     def guardar_progreso(self):
         self._ejecutar_guardado(ir_a_pareo=False)
@@ -1358,39 +1409,225 @@ class PantallaInscripcion(ttk.Frame):
 
     def abrir_ventana_cargar_torneo(self):
         ventana = tk.Toplevel(self)
-        ventana.title("Seleccionar Torneo (Debug)")
+        ventana.title("Búsqueda y Selección de Torneos")
 
-        # --- CENTRAR VENTANA ---
-        ancho, alto = 600, 300  # Ajusta estos números si necesitas más o menos espacio
+        # --- CENTRAR Y AGRANDAR VENTANA ---
+        ancho, alto = 950, 500  
         x = (self.winfo_screenwidth() // 2) - (ancho // 2)
         y = (self.winfo_screenheight() // 2) - (alto // 2)
         ventana.geometry(f"{ancho}x{alto}+{x}+{y}")
-
         ventana.transient(self)
         ventana.grab_set()
 
-        columnas = ("id", "nombre", "fecha", "categoria")
-        tabla_torneos = ttk.Treeview(ventana, columns=columnas, show="headings")
-        aplicar_deseleccion_tabla(tabla_torneos)
-        tabla_torneos.heading("id", text="ID"); tabla_torneos.column("id", width=50, anchor="center")
-        tabla_torneos.heading("nombre", text="Nombre"); tabla_torneos.column("nombre", width=250, anchor="w")
-        tabla_torneos.heading("fecha", text="Fecha"); tabla_torneos.column("fecha", width=100, anchor="center")
-        tabla_torneos.heading("categoria", text="Categoría Edad"); tabla_torneos.column("categoria", width=150, anchor="center")
-        tabla_torneos.pack(fill="both", expand=True, padx=10, pady=10)
+        main_frame = ttk.Frame(ventana)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        torneos = self.db.obtener_lista_torneos_debug()
-        for t in torneos:
-            tabla_torneos.insert("", "end", values=(t['id'], t['nombre'], t['fecha'], t['categoria']))
+        # ================= PANEL IZQUIERDO (FILTROS) =================
+        panel_filtros = ttk.LabelFrame(main_frame, text="Filtros de Búsqueda", padding=10)
+        panel_filtros.pack(side="left", fill="y", padx=(0, 10))
+
+        ttk.Label(panel_filtros, text="Buscar Nombre:").pack(anchor="w", pady=(0, 2))
+        self.ent_filtro_nombre = ttk.Entry(panel_filtros, width=25)
+        self.ent_filtro_nombre.pack(fill="x", pady=(0, 10))
+        self.ent_filtro_nombre.bind("<KeyRelease>", lambda e: self.filtrar_tabla_torneos(tabla_torneos))
+
+        ttk.Label(panel_filtros, text="Fecha Inicio (DD/MM/YYYY):").pack(anchor="w", pady=(0, 2))
+        self.ent_filtro_fecha_ini = ttk.Entry(panel_filtros, width=25)
+        self.ent_filtro_fecha_ini.pack(fill="x", pady=(0, 10))
+        aplicar_formato_fecha(self.ent_filtro_fecha_ini)
+        self.ent_filtro_fecha_ini.bind("<KeyRelease>", lambda e: self.filtrar_tabla_torneos(tabla_torneos))
+
+        ttk.Label(panel_filtros, text="Fecha Fin (DD/MM/YYYY):").pack(anchor="w", pady=(0, 2))
+        self.ent_filtro_fecha_fin = ttk.Entry(panel_filtros, width=25)
+        self.ent_filtro_fecha_fin.pack(fill="x", pady=(0, 10))
+        aplicar_formato_fecha(self.ent_filtro_fecha_fin)
+        self.ent_filtro_fecha_fin.bind("<KeyRelease>", lambda e: self.filtrar_tabla_torneos(tabla_torneos))
+
+        # --- FILTRO 1: CATEGORÍAS ---
+        ttk.Label(panel_filtros, text="Categorías:").pack(anchor="w", pady=(0, 2))
+        frame_cat_scroll = ttk.Frame(panel_filtros)
+        frame_cat_scroll.pack(fill="x", pady=(0, 10))
+        
+        scroll_cat = ttk.Scrollbar(frame_cat_scroll, orient="vertical")
+        self.listbox_filtro_cat = tk.Listbox(frame_cat_scroll, selectmode="multiple", height=4, yscrollcommand=scroll_cat.set, exportselection=False)
+        scroll_cat.config(command=self.listbox_filtro_cat.yview)
+        self.listbox_filtro_cat.pack(side="left", fill="both", expand=True)
+        scroll_cat.pack(side="right", fill="y")
+        self.listbox_filtro_cat.bind("<<ListboxSelect>>", lambda e: self.filtrar_tabla_torneos(tabla_torneos))
+
+        for cat in self.categorias_db:
+            self.listbox_filtro_cat.insert(tk.END, cat['nombre'])
+
+        # --- NUEVO FILTRO 2: ESTADOS ---
+        ttk.Label(panel_filtros, text="Estados:").pack(anchor="w", pady=(0, 2))
+        frame_est_scroll = ttk.Frame(panel_filtros)
+        frame_est_scroll.pack(fill="x", pady=(0, 10))
+        
+        scroll_est = ttk.Scrollbar(frame_est_scroll, orient="vertical")
+        self.listbox_filtro_est = tk.Listbox(frame_est_scroll, selectmode="multiple", height=4, yscrollcommand=scroll_est.set, exportselection=False)
+        scroll_est.config(command=self.listbox_filtro_est.yview)
+        self.listbox_filtro_est.pack(side="left", fill="both", expand=True)
+        scroll_est.pack(side="right", fill="y")
+        self.listbox_filtro_est.bind("<<ListboxSelect>>", lambda e: self.filtrar_tabla_torneos(tabla_torneos))
+
+        for est in ["En edición", "Iniciado", "En línea", "Terminado"]:
+            self.listbox_filtro_est.insert(tk.END, est)
+
+        ttk.Button(panel_filtros, text="Limpiar Filtros", command=lambda: self.limpiar_filtros_torneos(tabla_torneos)).pack(fill="x", pady=(5, 0))
+
+        # ================= PANEL DERECHO (TABLA Y BOTONES) =================
+        panel_derecho = ttk.Frame(main_frame)
+        panel_derecho.pack(side="right", fill="both", expand=True)
+
+        columnas = ("id", "nombre", "fecha", "categoria", "estado")
+        tabla_torneos = ttk.Treeview(panel_derecho, columns=columnas, show="headings")
+        aplicar_deseleccion_tabla(tabla_torneos)
+        
+        # CONFIGURACIÓN DE COLORES PARA LAS FILAS
+        tabla_torneos.tag_configure("st_terminado", foreground="#dc3545") # Rojo
+        tabla_torneos.tag_configure("st_en_linea", foreground="#28a745")  # Verde
+        tabla_torneos.tag_configure("st_iniciado", foreground="#d39e00")  # Amarillo oscuro para legibilidad
+        tabla_torneos.tag_configure("st_edicion", foreground="#6c757d")   # Gris
+        
+        # --- NUEVO: Fondo gris claro para el torneo que ya está cargado ---
+        tabla_torneos.tag_configure("st_actual", background="#e9ecef")
+        
+        tabla_torneos.heading("id", text="ID"); tabla_torneos.column("id", width=40, anchor="center")
+        tabla_torneos.heading("nombre", text="Nombre del Torneo"); tabla_torneos.column("nombre", width=250, anchor="w")
+        tabla_torneos.heading("fecha", text="Fecha"); tabla_torneos.column("fecha", width=90, anchor="center")
+        tabla_torneos.heading("categoria", text="Categoría"); tabla_torneos.column("categoria", width=120, anchor="center")
+        tabla_torneos.heading("estado", text="Estado"); tabla_torneos.column("estado", width=120, anchor="w")
+        tabla_torneos.pack(fill="both", expand=True, pady=(0, 10))
+
+        # Controles inferiores
+        btn_frame = ttk.Frame(panel_derecho)
+        btn_frame.pack(fill="x")
+
+        btn_cancelar = ttk.Button(btn_frame, text="Cancelar", command=ventana.destroy)
+        btn_cancelar.pack(side="right", padx=(5, 0))
+
+        btn_cargar = ttk.Button(btn_frame, text="Seleccionar Torneo", command=lambda: self.ejecutar_carga_torneo(tabla_torneos, ventana))
+        btn_cargar.pack(side="right")
 
         tabla_torneos.bind("<Double-1>", lambda e: self.ejecutar_carga_torneo(tabla_torneos, ventana))
 
-        btn_cargar = ttk.Button(ventana, text="Cargar en Pantalla", command=lambda: self.ejecutar_carga_torneo(tabla_torneos, ventana))
-        btn_cargar.pack(pady=10)
+        # Desplegar datos iniciales
+        self.cargar_memoria_torneos()
+        self.filtrar_tabla_torneos(tabla_torneos)
+
+        # Iniciar el motor de actualización en vivo
+        self.bucle_refrescar_busqueda_torneos(ventana, tabla_torneos)
+
+    def bucle_refrescar_busqueda_torneos(self, ventana, tabla):
+        """Mantiene la tabla de torneos actualizada en tiempo real mientras la ventana exista."""
+        if not ventana.winfo_exists(): return # Si el usuario cerró la ventana, detener el bucle
+        
+        # 1. Guardar qué fila tenía seleccionada el usuario para no arruinarle el clic
+        seleccionados = [tabla.item(i, "values")[0] for i in tabla.selection()]
+        
+        # 2. Descargar los estados frescos desde la Base de Datos
+        self.cargar_memoria_torneos()
+        
+        # 3. Refrescar la tabla aplicando los filtros que el usuario tenga escritos
+        self.filtrar_tabla_torneos(tabla)
+        
+        # 4. Restaurar la selección silenciosamente
+        for item in tabla.get_children():
+            id_item = tabla.item(item, "values")[0]
+            if str(id_item) in [str(x) for x in seleccionados]:
+                tabla.selection_add(item)
+                
+        # 5. Volver a comprobar en 2 segundos
+        ventana.after(2000, lambda: self.bucle_refrescar_busqueda_torneos(ventana, tabla))
+
+    # --- FUNCIONES DE SOPORTE PARA EL BUSCADOR DE TORNEOS ---
+    def cargar_memoria_torneos(self):
+        """Descarga los torneos y calcula sus estados visuales con etiquetas de color."""
+        torneos_raw = self.db.obtener_lista_torneos_debug()
+        self.torneos_memoria_carga = []
+
+        for t in torneos_raw:
+            # 1. Terminado (Máxima prioridad, anula en línea)
+            if t.get('fecha_fin'):
+                estado_puro = "Terminado"
+                tag = "st_terminado"
+            # 2. En Línea (Hay un master activo)
+            elif t.get('tiene_master'):
+                estado_puro = "En línea"
+                tag = "st_en_linea"
+            else:
+                # 3. Iniciado o En Edición (Depende de si ya hay llaves bloqueadas)
+                bloqueadas = self.db.obtener_divisiones_bloqueadas(t['id'])
+                if bloqueadas and len(bloqueadas) > 0:
+                    estado_puro = "Iniciado"
+                    tag = "st_iniciado"
+                else:
+                    estado_puro = "En edición"
+                    tag = "st_edicion"
+
+            t['estado_puro'] = estado_puro
+            t['estado_str'] = f"● {estado_puro}"
+            t['tag_estado'] = tag
+            self.torneos_memoria_carga.append(t)
+
+    def limpiar_filtros_torneos(self, tabla):
+        self.ent_filtro_nombre.delete(0, tk.END)
+        self.ent_filtro_fecha_ini.delete(0, tk.END)
+        self.ent_filtro_fecha_fin.delete(0, tk.END)
+        self.listbox_filtro_cat.selection_clear(0, tk.END)
+        if hasattr(self, 'listbox_filtro_est'):
+            self.listbox_filtro_est.selection_clear(0, tk.END)
+        self.filtrar_tabla_torneos(tabla)
+
+    def filtrar_tabla_torneos(self, tabla):
+        for item in tabla.get_children(): tabla.delete(item)
+
+        term_nombre = self.ent_filtro_nombre.get().strip().lower()
+        term_fini = self.ent_filtro_fecha_ini.get().strip()
+        term_ffin = self.ent_filtro_fecha_fin.get().strip()
+        sel_cats = [self.listbox_filtro_cat.get(i) for i in self.listbox_filtro_cat.curselection()]
+        sel_ests = [self.listbox_filtro_est.get(i) for i in self.listbox_filtro_est.curselection()] if hasattr(self, 'listbox_filtro_est') else []
+
+        dt_ini = dt_fin = None
+        if len(term_fini) == 10:
+            try: dt_ini = datetime.strptime(term_fini, "%d/%m/%Y").date()
+            except: pass
+        if len(term_ffin) == 10:
+            try: dt_fin = datetime.strptime(term_ffin, "%d/%m/%Y").date()
+            except: pass
+
+        for t in self.torneos_memoria_carga:
+            if term_nombre and term_nombre not in t['nombre'].lower(): continue
+            if sel_cats and t['categoria'] not in sel_cats: continue
+            if sel_ests and t['estado_puro'] not in sel_ests: continue
+
+            if dt_ini or dt_fin:
+                try:
+                    t_fecha_str = str(t['fecha'])
+                    t_date = datetime.strptime(t_fecha_str, "%d/%m/%Y").date()
+                    if dt_ini and t_date < dt_ini: continue
+                    if dt_fin and t_date > dt_fin: continue
+                except: pass
+
+            # --- NUEVO: Inyectar el TAG de color y verificar si es el actual ---
+            tags_fila = [t['tag_estado']]
+            if getattr(self, "torneo_debug_id", None) == t['id']:
+                tags_fila.append("st_actual")
+                # Opcional: Modificamos el texto para que sea obvio
+                t['estado_str'] = f"{t['estado_str']} (Actual)"
+                
+            tabla.insert("", "end", values=(t['id'], t['nombre'], t['fecha'], t['categoria'], t['estado_str']), tags=tuple(tags_fila))
 
     def ejecutar_carga_torneo(self, tabla, ventana):
-        item_sel = tabla.selection()
-        if not item_sel: return messagebox.showwarning("Selección", "Seleccione un torneo.")
-        id_torneo = int(tabla.item(item_sel[0], "values")[0])
+        seleccion = tabla.selection()
+        if not seleccion:
+            return messagebox.showwarning("Aviso", "Seleccione un torneo de la lista.")
+
+        id_torneo = int(tabla.item(seleccion[0], "values")[0])
+        
+        # --- NUEVO: Bloqueo de seguridad para evitar el glitch de recarga ---
+        if getattr(self, "torneo_debug_id", None) == id_torneo:
+            return messagebox.showinfo("Torneo Activo", "Este torneo ya está cargado y activo actualmente.")
 
         # Desconectar de sala previa si aplica
         if hasattr(self.controller, 'id_conexion_red') and self.controller.id_conexion_red:
@@ -1411,13 +1648,9 @@ class PantallaInscripcion(ttk.Frame):
         self.cmb_tor_ciudad.set(datos_torneo.get('ciudad_nombre', ''))
         self.cmb_tor_ciudad.config(state="disabled")
         
-        # Seleccionar índice correcto del combobox para evitar errores de filtrado
+        # Seleccionar la categoría correctamente con set
         self.cmb_categoria.config(state="normal")
-        try:
-            idx_cat = list(self.cmb_categoria['values']).index(datos_torneo['categoria'])
-            self.cmb_categoria.current(idx_cat)
-        except ValueError:
-            self.cmb_categoria.set(datos_torneo['categoria'])
+        self.cmb_categoria.set(datos_torneo['categoria'])
 
         # 2. Limpiar memoria y tabla
         self.inscripciones_memoria.clear()
@@ -1461,6 +1694,9 @@ class PantallaInscripcion(ttk.Frame):
         self.btn_cancelar_torneo.pack_forget()
         self.form_frame.config(text="2. Inscripción y Pesaje (Habilitado)")
         self.cambiar_estado_inscripcion("normal")
+        
+        # --- NUEVO: Rellenar el combobox con los atletas válidos al cargar el torneo ---
+        self.filtrar_atletas_por_edad()
 
         # --- GESTIÓN DE RED SEGURA ---
         import socket, os
@@ -1512,6 +1748,9 @@ class PantallaInscripcion(ttk.Frame):
         self.iniciar_escucha_red()
         self.actualizar_tabla_visual()
         self.refrescar_estado_bloqueos()
+
+        # --- NUEVO: Forzar actualización del botón Limpiar/Nuevo Torneo ---
+        self.actualizar_btn_nuevo_limpiar()
 
     def refrescar_estado_bloqueos(self):
         """Consulta la BD y actualiza la interfaz si hubo cambios en la pantalla de Pareo."""
@@ -1674,6 +1913,9 @@ class PantallaInscripcion(ttk.Frame):
             
             self.btn_guardar_torneo.config(state="normal", text="💾 Guardar Cambios")
             self.btn_avanzar_pareo.config(state="normal")
+            
+            # --- NUEVO: Forzar actualización del botón Limpiar/Nuevo Torneo ---
+            self.actualizar_btn_nuevo_limpiar()
             
             messagebox.showinfo("Sala Creada", f"¡Éxito! Torneo creado.\n\nEres el MASTER desde '{nombre_pc}'.")
             self.iniciar_escucha_red()
@@ -1906,11 +2148,62 @@ class PantallaInscripcion(ttk.Frame):
                 messagebox.showerror("Error", "La función no está implementada en la base de datos.")
 
     # ================= RADAR DE RED (AUTO-REFRESCO) =================
+    def escuchar_nuevos_atletas_red(self):
+        """Descarga en tiempo real los atletas que otros usuarios (o guests) sincronizan."""
+        if not getattr(self, 'torneo_debug_id', None) or not getattr(self, 'escuchando_red', False):
+            return
+            
+        try:
+            inscripciones_bd = self.db.obtener_inscripciones_pareo(self.torneo_debug_id)
+            
+            if inscripciones_bd:
+                # 1. Agrupar la BD entrante igual que como se carga un torneo
+                atletas_agrupados = {}
+                for ins in inscripciones_bd:
+                    id_atl = ins['id_peleador']
+                    if id_atl not in atletas_agrupados:
+                        atletas_agrupados[id_atl] = {"datos_bd": ins, "estilos": [], "pesos_text": [], "ids_divisiones": []}
+                    if ins['estilo'] not in atletas_agrupados[id_atl]["estilos"]:
+                        atletas_agrupados[id_atl]["estilos"].append(ins['estilo'])
+                        atletas_agrupados[id_atl]["pesos_text"].append(f"{ins['estilo'][:3]}: {ins['peso_maximo']}kg")
+                        atletas_agrupados[id_atl]["ids_divisiones"].append(ins['id_division'])
+
+                # 2. Si la BD tiene más atletas que nuestra memoria local, actualizamos
+                if len(atletas_agrupados) > len(self.inscripciones_memoria):
+                    self.atletas_db = self.db.obtener_atletas() # Descargar info fresca (nombres, clubes)
+                    ids_locales = [int(a['id_atleta']) for a in self.inscripciones_memoria]
+                    
+                    hubo_cambios = False
+                    for id_atl, data in atletas_agrupados.items():
+                        if id_atl not in ids_locales:
+                            hubo_cambios = True
+                            info = data["datos_bd"]
+                            texto_peso_oficial = " | ".join(data["pesos_text"])
+                            
+                            self.inscripciones_memoria.append({
+                                "id_atleta": id_atl, 
+                                "peso": str(info['peso_pesaje']),
+                                "peso_oficial": texto_peso_oficial, 
+                                "estilos": data["estilos"], 
+                                "ids_divisiones": data["ids_divisiones"],
+                                "de_red": True # <--- Marcador Mágico para colorearlo en azul
+                            })
+                    
+                    if hubo_cambios:
+                        self.actualizar_tabla_visual()
+                        self.filtrar_atletas_por_edad() # Actualiza los combobox
+        except Exception as e:
+            pass
+        
+        # Volver a vigilar en 3 segundos
+        self.after(3000, self.escuchar_nuevos_atletas_red)
+
     def iniciar_escucha_red(self):
         """Inicia el bucle que consulta la BD cada 3 segundos."""
         if not hasattr(self, 'escuchando_red') or not self.escuchando_red:
             self.escuchando_red = True
             self.ciclo_escucha_red()
+            self.escuchar_nuevos_atletas_red() # <--- NUEVO MOTOR ACTIVADO
 
     def ciclo_escucha_red(self):
         if not getattr(self, "escuchando_red", False): return

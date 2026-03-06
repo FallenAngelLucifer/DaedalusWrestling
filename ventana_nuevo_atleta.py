@@ -7,10 +7,11 @@ from conexion_db import ConexionDB
 from utilidades import ComboBuscador, aplicar_formato_fecha, aplicar_formato_cedula
 
 class VentanaNuevoRegistro(tk.Toplevel):
-    def __init__(self, parent):
+    def __init__(self, parent, es_master=True):
         super().__init__(parent)
         self.parent = parent
         self.db = ConexionDB()
+        self.es_master = es_master # <-- Guardar permiso
         
         self.title("Gestión Completa de Catálogos y Atletas")
 
@@ -68,9 +69,16 @@ class VentanaNuevoRegistro(tk.Toplevel):
         sub_nb = ttk.Notebook(parent_tab)
         sub_nb.pack(fill="both", expand=True, padx=10, pady=10)
         tab_add = ttk.Frame(sub_nb, padding=10)
-        tab_edit = ttk.Frame(sub_nb, padding=10)
         sub_nb.add(tab_add, text="➕ Añadir Nuevo")
-        sub_nb.add(tab_edit, text="✏️ Editar Existente")
+        
+        # --- NUEVO: Ocultar edición a invitados ---
+        if getattr(self, 'es_master', True):
+            tab_edit = ttk.Frame(sub_nb, padding=10)
+            sub_nb.add(tab_edit, text="✏️ Editar Existente")
+        else:
+            # Frame fantasma para evitar errores de referencias en tus controles
+            tab_edit = ttk.Frame(sub_nb) 
+            
         return tab_add, tab_edit
 
     # ================= INTERFAZ PRINCIPAL =================
