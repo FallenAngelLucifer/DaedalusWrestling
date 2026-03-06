@@ -153,11 +153,12 @@ class VentanaEditarPelea(tk.Toplevel):
         self.cmb_ganador = ComboBuscador(frame_resultados, values=[self.p_rojo['nombre'], self.p_azul['nombre']], state="readonly", width=25)
         self.cmb_ganador.grid(row=3, column=1, columnspan=2, sticky="w", pady=(15, 5))
         
-        # --- NUEVO: VINCULAR EVENTO ---
         self.cmb_ganador.bind("<<ComboboxSelected>>", self.actualizar_opciones_victoria)
         
         ganador_data = self.match_node.get("ganador", {})
-        if ganador_data: self.cmb_ganador.set(ganador_data.get("nombre", ""))
+        ganador_actual = ganador_data.get("nombre", "")
+        if ganador_actual: 
+            self.cmb_ganador.set(ganador_actual)
 
         ttk.Label(frame_resultados, text="Tipo de Victoria:", font=("Helvetica", 10, "bold")).grid(row=4, column=0, sticky="w", pady=5)
         self.cmb_victoria = ComboBuscador(frame_resultados, values=self.tipos_victoria, state="readonly", width=50)
@@ -166,16 +167,20 @@ class VentanaEditarPelea(tk.Toplevel):
         if ganador_data and "motivo_victoria" in ganador_data: 
             self.cmb_victoria.set(ganador_data["motivo_victoria"])
 
-        aplicar_autocompletado(self.cmb_ganador, [self.p_rojo['nombre'], self.p_azul['nombre']])
+        # --- LÓGICA DE SEGURIDAD ABSOLUTA ---
+        if self.verificar_siguiente_combate_vacio():
+            # ESTÁ LIBRE: Aplicamos autocompletado normal
+            aplicar_autocompletado(self.cmb_ganador, [self.p_rojo['nombre'], self.p_azul['nombre']])
+        else:
+            # ESTÁ BLOQUEADO: Lo sellamos y omitimos aplicar_autocompletado para evitar inyecciones
+            self.cmb_ganador.config(values=[ganador_actual], state="disabled")
 
-        # --- NUEVO: EJECUTAR AL INICIO ---
         self.actualizar_opciones_victoria()
 
         # --- BOTONES FINALES ---
         botones_frame = tk.Frame(self)
         botones_frame.pack(pady=15)
 
-        # NUEVO BOTÓN CANCELAR
         tk.Button(botones_frame, text="CANCELAR", font=("Helvetica", 10, "bold"), bg="#dc3545", fg="white", command=self.destroy).pack(side="left", padx=10, ipadx=10, ipady=5)
         
         tk.Button(botones_frame, text="GUARDAR Y CONFIRMAR EDICIÓN", font=("Helvetica", 10, "bold"), bg="#28a745", fg="white", command=self.guardar_datos).pack(side="left", padx=10, ipadx=10, ipady=5)
@@ -197,7 +202,7 @@ class VentanaEditarPelea(tk.Toplevel):
     def guardar_datos(self):
         id_arb = self.oficiales_db[self.cmb_arbitro.current()]['id'] if self.cmb_arbitro.current() != -1 else None
         id_jue = self.oficiales_db[self.cmb_juez.current()]['id'] if self.cmb_juez.current() != -1 else None
-        id_jef = self.id_jefe_orig # <-- NUEVO: El Jefe de Tapiz no cambia
+        id_jef = self.id_jefe_orig 
         
         if not self.cmb_ganador.get(): 
             return messagebox.showwarning("Falta Ganador", "Debe seleccionar quién ganó el combate.")
@@ -209,12 +214,14 @@ class VentanaEditarPelea(tk.Toplevel):
         ganador_nuevo = self.cmb_ganador.get()
         motivo_nuevo = self.cmb_victoria.get()
 
-        # --- NUEVO: ADVERTENCIA CAMBIO DE GANADOR ---
         if ganador_previo and ganador_nuevo != ganador_previo:
+            # --- BARRERA DE SEGURIDAD BACKEND ---
+            if not self.verificar_siguiente_combate_vacio():
+                return messagebox.showerror("Bloqueo de Seguridad", "Violación de integridad detectada.\n\nNo puedes cambiar el ganador de este combate porque el atleta actual ya avanzó y está registrado en una ronda posterior.\n\nPara corregir este resultado, primero debes deshacer la pelea futura.")
+
             if not messagebox.askyesno("Cambio de Ganador", f"Está a punto de cambiar al ganador de '{ganador_previo}' a '{ganador_nuevo}'.\n\n¿Está completamente seguro?"):
                 return
 
-        # --- NUEVO: ADVERTENCIA DESCALIFICACIÓN (DSQ) ---
         if "DSQ" in motivo_nuevo and "DSQ" not in str(motivo_previo):
             if not messagebox.askyesno("Descalificación Irreversible", "⚠️ ADVERTENCIA DE SEGURIDAD\n\nHa seleccionado una descalificación (DSQ).\n\nLos atletas descalificados serán eliminados del torneo de forma permanente y NO podrán ser reintegrados a la competencia.\n\n¿Desea aplicar esta descalificación?"):
                 return
@@ -275,3 +282,43 @@ class VentanaEditarPelea(tk.Toplevel):
         # Si el valor actual no coincide con la nueva realidad, se limpia y se pone el primero de la lista
         if valor_actual not in opciones_validas:
             self.cmb_victoria.set(opciones_validas[0] if opciones_validas else "")
+
+    def verificar_siguiente_combate_vacio(self):
+        """Rastrea la llave matemática para verificar si el ganador ya participó en una ronda posterior."""
+        match_id = self.match_node.get("match_id", "")
+        if not match_id: return True
+        
+        try:
+            r_actual = int(match_id.split("_")[0][1:]) # Ej: Extrae '1' de 'R1'
+            k_actual = int(match_id.split("_")[1][1:]) # Ej: Extrae '0' de 'M0'
+            
+            # --- CORRECCIÓN CLAVE: Usamos self.master para acceder a PantallaPareo ---
+            pantalla_pareo = self.master 
+            grid = getattr(pantalla_pareo, "grids_generados", {}).get(self.llave_key, [])
+            
+            r_eval = r_actual + 1
+            k_eval = k_actual // 2
+            
+            while r_eval < len(grid):
+                nodo_siguiente = grid[r_eval][k_eval]
+                
+                if isinstance(nodo_siguiente, dict) and nodo_siguiente.get("tipo") == "combate":
+                    # 1. Si el siguiente combate ya tiene un ganador, este atleta ya peleó
+                    if nodo_siguiente.get("ganador"):
+                        return False 
+                    
+                    # 2. Si el siguiente combate se está peleando AHORA MISMO en algún tapiz
+                    tapiz_activo = getattr(pantalla_pareo, 'combates_en_curso_red', {}).get(self.llave_key, {}).get(nodo_siguiente.get("match_id"))
+                    if tapiz_activo:
+                        return False
+                        
+                    return True # El camino está libre
+                
+                # Si la casilla no es un combate (es un pase directo/SKIP), seguimos a la siguiente ronda
+                r_eval += 1
+                k_eval = k_eval // 2
+                
+            return True
+        except Exception as e:
+            print(f"Error evaluando bloqueo de ganador: {e}")
+            return True

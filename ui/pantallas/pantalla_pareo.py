@@ -62,6 +62,9 @@ class PantallaPareo(ttk.Frame):
         # --- NUEVO: Etiqueta de mi Tapiz Actual ---
         self.lbl_mi_tapiz_header = ttk.Label(header_frame, text="📍 Tapiz Asignado: Pendiente", font=("Helvetica", 12, "bold"), foreground="#007bff")
         self.lbl_mi_tapiz_header.pack(side="left", expand=True, anchor="w")
+        
+        # CORRECCIÓN: Usar header_frame en lugar de self.frame_header
+        self.btn_gestion_red = tk.Button(header_frame, text="👥 Gestionar Red", font=("Helvetica", 9, "bold"), bg="#17a2b8", fg="white", cursor="hand2", command=self.abrir_panel_red)
 
         # --- NUEVA FILA: Frame exclusivo para exportaciones masivas ---
         self.export_frame = ttk.Frame(self)
@@ -481,6 +484,12 @@ class PantallaPareo(ttk.Frame):
         self.es_master = es_master
         self.tapiz_asignado = tapiz
 
+        # --- NUEVO: Lógica de visibilidad del botón de red ---
+        if self.es_master:
+            self.btn_gestion_red.pack(side="right", padx=10, pady=5)
+        else:
+            self.btn_gestion_red.pack_forget()
+
         self.escuchando_red = True
 
         inscripciones = self.db.obtener_inscripciones_pareo(self.id_torneo)
@@ -527,103 +536,113 @@ class PantallaPareo(ttk.Frame):
             
         self.verificar_estado_torneo()
         self.gestionar_botones_globales()
-        self.construir_panel_red()
-        self.actualizar_bucle_red()
-
-    # ==========================================================
-    # --- SISTEMA DE RED: PANEL Y BUCLES DE ACTUALIZACIÓN ---
-    # ==========================================================
-    def construir_panel_red(self):
-        self.panel_red = ttk.LabelFrame(self.contenedor_principal, text="🌐 Gestión de Red", width=340)
-        self.panel_red.pack(side="right", fill="y", padx=(0, 20), pady=10)
-        self.panel_red.pack_propagate(False)
-
-        # ESTADO 1: Torneo Finalizado (Se bloquea el apartado)
-        if getattr(self, "torneo_cerrado_en_db", False):
-            ttk.Label(self.panel_red, text="🏆 TORNEO FINALIZADO", font=("Helvetica", 12, "bold"), foreground="#6c757d").pack(pady=(30, 5))
-            ttk.Label(self.panel_red, text="Modo Solo Lectura\nLa conexión de red está desactivada.", justify="center", foreground="#aaaaaa").pack()
-            return
-
-        # ESTADO 2: Torneo Activo
-        # Etiqueta MASTER Fija (Por fuera de la tabla)
-        self.lbl_master_global = ttk.Label(self.panel_red, text="Buscando Master...", font=("Helvetica", 10, "bold"), foreground="#28a745", justify="center")
-        self.lbl_master_global.pack(pady=10)
-        
-        ttk.Separator(self.panel_red, orient="horizontal").pack(fill="x", pady=5)
-        
-        self.lbl_mi_rol = ttk.Label(self.panel_red, text="", font=("Helvetica", 9, "bold"), justify="center")
-        self.lbl_mi_rol.pack(pady=5)
-
-        # TREEVIEW para todos los clientes (lista de guests)
-        # ---> CORRECCIÓN: Se añade la columna 'estado' para que coincida con los datos insertados
-        self.tree_red = ttk.Treeview(self.panel_red, columns=("id", "arbitro", "equipo", "tapiz", "estado"), show="headings", height=8)
-        aplicar_deseleccion_tabla(self.tree_red)
-        self.tree_red.heading("id", text="ID")
-        self.tree_red.heading("arbitro", text="Árbitro")
-        self.tree_red.heading("equipo", text="Dispositivo")
-        self.tree_red.heading("tapiz", text="Tapiz")
-        self.tree_red.heading("estado", text="Estado")
-        
-        self.tree_red.column("id", width=30, anchor="center")
-        self.tree_red.column("arbitro", width=100)
-        self.tree_red.column("equipo", width=100)
-        self.tree_red.column("tapiz", width=80, anchor="center")
-        self.tree_red.column("estado", width=0, stretch=tk.NO) # Se mantiene oculta
-        
-        # Fila gris claro para los que están esperando
-        self.tree_red.tag_configure("esperando", background="#e9ecef", foreground="#6c757d")
-        self.tree_red.pack(fill="both", expand=True, padx=5, pady=5)
-
-        if self.es_master:
-            self.lbl_mi_rol.config(text=f"Tu Rol: MASTER ({self.tapiz_asignado})", foreground="#28a745")
-            
-            f_controles = ttk.Frame(self.panel_red)
-            f_controles.pack(fill="x", padx=5, pady=10)
-            
-            tapices_restantes = [f"Tapiz {chr(65+i)}" for i in range(1, getattr(self, 'num_tapices_torneo', 1))]
-            if not tapices_restantes: tapices_restantes = ["---"]
-
-            ttk.Label(f_controles, text="Asignar Tapiz a Solicitante:").pack(anchor="w")
-            self.cmb_asignar_tapiz = ttk.Combobox(f_controles, values=tapices_restantes, state="readonly")
-            self.cmb_asignar_tapiz.current(0)
-            self.cmb_asignar_tapiz.pack(fill="x", pady=(2, 10))
-
-            tk.Button(f_controles, text="✅ Aprobar Acceso", bg="#007bff", fg="white", font=("Helvetica", 9, "bold"), command=self.aprobar_conexion_red).pack(fill="x", pady=2)
-            tk.Button(f_controles, text="❌ Rechazar", bg="#dc3545", fg="white", command=self.rechazar_conexion_red).pack(fill="x", pady=2)
-            
-        else:
-            self.lbl_mi_rol.config(text=f"Tu Rol: CLIENTE", foreground="#17a2b8")
-            self.lbl_estado_cliente = ttk.Label(self.panel_red, text="⏳ Solicitud enviada al Master...", font=("Helvetica", 9, "bold"), foreground="#f39c12")
-            self.lbl_estado_cliente.pack(pady=10)
-            
-        # Un solo bucle unificado
         self.actualizar_bucle_red()
 
     def actualizar_bucle_red(self):
         if not getattr(self, "escuchando_red", False): return
 
-        # 1. Actualizar etiqueta superior con el tapiz asignado
+        # --- 1. VERIFICACIÓN DE SUPERVIVENCIA Y CAMBIOS DE ROL ---
+        if not getattr(self, "torneo_cerrado_en_db", False) and hasattr(self, 'id_conexion_red') and self.id_conexion_red:
+            mi_estado = self.db.verificar_estado_mi_conexion(self.id_conexion_red)
+            
+            # --- NUEVO: TOLERANCIA DE RED (Previene expulsiones por carga de interfaz o BD) ---
+            if not hasattr(self, 'strikes_desconexion'): self.strikes_desconexion = 0
+            
+            # A) Expulsión o Corte de Red
+            if not mi_estado or (not mi_estado.get('es_master', False) and mi_estado.get('estado_conexion') != 'Aprobado'):
+                self.strikes_desconexion += 1
+                # Si falla 3 veces seguidas (aprox 9 segundos), asumimos que la expulsión es real
+                if self.strikes_desconexion >= 3:
+                    self.escuchando_red = False 
+                    self.cerrar_panel_combate() 
+                    messagebox.showwarning("Desconectado", "El Director del torneo ha cerrado tu sesión, o se perdió la conexión con el servidor.")
+                    self.regresar_a_inscripcion()
+                    return 
+            else:
+                self.strikes_desconexion = 0 # La conexión es saludable, reseteamos a 0.
+
+                # B) Detección de transferencia de poder (Máster)
+                estado_master_bd = mi_estado.get('es_master', False)
+                if estado_master_bd != getattr(self, "es_master", False):
+                    self.es_master = estado_master_bd
+                    self.controller.es_master = estado_master_bd
+                    
+                    if self.es_master:
+                        self.btn_gestion_red.pack(side="right", padx=10, pady=5)
+                    else:
+                        self.btn_gestion_red.pack_forget()
+                        if hasattr(self, 'popup_red') and self.popup_red.winfo_exists():
+                            self.popup_red.destroy()
+                            
+                    self.verificar_estado_torneo()
+
+                # C) Actualización dinámica de mi Tapiz asignado
+                nuevo_tapiz = mi_estado.get('tapiz_asignado') or "Pendiente"
+                if nuevo_tapiz != getattr(self.controller, 'tapiz_asignado', ''):
+                    self.controller.tapiz_asignado = nuevo_tapiz
+                    self.tapiz_asignado = nuevo_tapiz
+
+        # 2. Actualizar etiqueta superior con el tapiz asignado
         if hasattr(self, 'lbl_mi_tapiz_header'):
             tapiz_actual = getattr(self.controller, 'tapiz_asignado', 'Pendiente')
             color_tapiz = "#28a745" if tapiz_actual != "Pendiente" else "#f39c12"
             self.lbl_mi_tapiz_header.config(text=f"📍 Tapiz Asignado: {tapiz_actual}", foreground=color_tapiz)
 
+        # --- LÓGICA DEL PANEL FLOTANTE DE RED ---
+        if hasattr(self.db, 'obtener_conexiones_torneo'):
+            conexiones = self.db.obtener_conexiones_torneo(self.id_torneo)
+            
+            # Badge de Notificación Inteligente para el Master
+            if getattr(self, "es_master", False) and hasattr(self, "btn_gestion_red"):
+                pendientes = sum(1 for c in conexiones if c.get('estado_conexion') == 'Esperando')
+                if pendientes > 0:
+                    self.btn_gestion_red.config(text=f"👥 Gestionar Red ({pendientes} Solicitudes)", bg="#fd7e14")
+                else:
+                    self.btn_gestion_red.config(text="👥 Gestionar Red", bg="#17a2b8")
+
+            # Actualizar la tabla solo si el popup de Master está abierto
+            if hasattr(self, 'popup_red') and self.popup_red.winfo_exists() and hasattr(self, 'tabla_red_popup'):
+                
+                # A) GUARDAR LA SELECCIÓN ACTUAL
+                selecciones_guardadas = []
+                for item_id in self.tabla_red_popup.selection():
+                    item_val = self.tabla_red_popup.item(item_id, 'values')
+                    if item_val: selecciones_guardadas.append(str(item_val[0]))
+                
+                # B) BORRAR TABLA
+                for item in self.tabla_red_popup.get_children():
+                    self.tabla_red_popup.delete(item)
+
+                # C) RE-INSERTAR DATOS
+                nuevos_items = {}
+                for c in conexiones:
+                    es_yo = (c['id_conexion'] == getattr(self, "id_conexion_red", -1))
+                    tag = "yo_mismo" if es_yo else ("confirmado" if c['estado_conexion'] == 'Aprobado' else "pendiente")
+                    nombre_visual = f"⭐ {c['nombre']} {c['apellidos']}" if c.get('es_master') else f"{c['nombre']} {c['apellidos']}"
+                    tapiz_visual = c['tapiz_asignado'] or "N.A."
+                    
+                    item_insertado = self.tabla_red_popup.insert("", "end", values=(c['id_conexion'], nombre_visual, c['nombre_dispositivo'], tapiz_visual, c['estado_conexion']), tags=(tag,))
+                    nuevos_items[str(c['id_conexion'])] = item_insertado
+                
+                # D) RESTAURAR SELECCIÓN Y FOCO
+                for id_guardado in selecciones_guardadas:
+                    if id_guardado in nuevos_items:
+                        self.tabla_red_popup.selection_add(nuevos_items[id_guardado])
+                        self.tabla_red_popup.focus(nuevos_items[id_guardado])
+                
+                # E) RE-EVALUAR LOS BOTONES DE LA UI
+                self.evaluar_seleccion_red()
+        # -----------------------------------------------
+
         # 2. Descargar combates bloqueados (en progreso)
-        if hasattr(self.db, 'obtener_combates_en_curso'):
-            nuevos_combates = self.db.obtener_combates_en_curso(self.id_torneo)
-        else:
-            nuevos_combates = {}
+        nuevos_combates = self.db.obtener_combates_en_curso(self.id_torneo) if hasattr(self.db, 'obtener_combates_en_curso') else {}
 
         # 3. Descargar resultados de combates ya finalizados
-        if hasattr(self.db, 'cargar_resultados_combates'):
-            nuevos_resultados = self.db.cargar_resultados_combates(self.id_torneo)
-        else:
-            nuevos_resultados = getattr(self, 'resultados_combates', {})
+        nuevos_resultados = self.db.cargar_resultados_combates(self.id_torneo) if hasattr(self.db, 'cargar_resultados_combates') else getattr(self, 'resultados_combates', {})
 
         # 4. Detectar si hubo cambios en progreso o en ganadores
         estado_anterior_curso = getattr(self, 'combates_en_curso_red', {})
         estado_anterior_resultados = getattr(self, 'resultados_combates', {})
-        
         hubo_cambios = (nuevos_combates != estado_anterior_curso) or (nuevos_resultados != estado_anterior_resultados)
         
         self.combates_en_curso_red = nuevos_combates
@@ -642,46 +661,222 @@ class PantallaPareo(ttk.Frame):
                 else:
                     tab_actual = self.notebook.nametowidget(self.notebook.select())
                     self.procesar_y_dibujar(tab_actual)
-                
-                # Refrescamos las estadísticas de torneo (Combates faltantes)
                 self.verificar_estado_torneo()
-
-        # 6. Refrescar lista lateral (Panel de Máster si aplica)
-        if hasattr(self, 'refrescar_tabla_red'):
-            self.refrescar_tabla_red()
         
+        # 6. Latido de supervivencia
+        if hasattr(self, 'id_conexion_red') and self.id_conexion_red and hasattr(self.db, 'ping_actividad_conexion'):
+            self.db.ping_actividad_conexion(self.id_conexion_red)
+
         # Repetir bucle
         self.after(3000, self.actualizar_bucle_red)
 
-    def refrescar_tabla_red(self):
-        if not getattr(self, 'id_torneo', None): return
+    # ================= MÉTODOS DE RED EN PAREO (POPUP MÁSTER) =================
+    def abrir_panel_red(self):
+        """Abre un panel flotante con la gestión de red sin salir de la pantalla de pareo."""
+        if hasattr(self, 'popup_red') and self.popup_red.winfo_exists():
+            self.popup_red.lift()
+            return
+
+        self.popup_red = tk.Toplevel(self)
+        self.popup_red.title("Gestión de Red (Torneo en Vivo)")
+        self.popup_red.geometry("700x320")
+        self.popup_red.transient(self)
+        
+        x = self.winfo_rootx() + (self.winfo_width() // 2) - (700 // 2)
+        y = self.winfo_rooty() + (self.winfo_height() // 2) - (320 // 2)
+        self.popup_red.geometry(f"+{x}+{y}")
+
+        columnas_red = ("ID", "Usuario", "Dispositivo", "Tapiz", "Estado")
+        self.tabla_red_popup = ttk.Treeview(self.popup_red, columns=columnas_red, show="headings", height=8, selectmode="extended")
+        self.tabla_red_popup.heading("ID", text="ID")
+        self.tabla_red_popup.heading("Usuario", text="Oficial / Árbitro")
+        self.tabla_red_popup.heading("Dispositivo", text="Dispositivo")
+        self.tabla_red_popup.heading("Tapiz", text="Tapiz Asignado")
+        self.tabla_red_popup.heading("Estado", text="Estado")
+
+        self.tabla_red_popup.column("ID", width=30, anchor="center")
+        self.tabla_red_popup.column("Usuario", width=180)
+        self.tabla_red_popup.column("Dispositivo", width=120)
+        self.tabla_red_popup.column("Tapiz", width=100, anchor="center")
+        self.tabla_red_popup.column("Estado", width=100, anchor="center")
+
+        self.tabla_red_popup.tag_configure("yo_mismo", background="#d4edda")
+        self.tabla_red_popup.tag_configure("pendiente", background="#fff3cd")
+        self.tabla_red_popup.tag_configure("confirmado", background="#ffffff")
+        self.tabla_red_popup.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # CONTROLES DE RED
+        frame_controles = tk.Frame(self.popup_red)
+        frame_controles.pack(fill="x", padx=10, pady=5)
+
+        # Corregido: Solo dice "Aprobar", ya no "Asignar"
+        self.btn_aprobar_red = tk.Button(frame_controles, text="✅ Aprobar", bg="#28a745", fg="white", state="disabled", command=self.aprobar_conexion)
+        self.btn_aprobar_red.pack(side="left", padx=5)
+        
+        self.btn_rechazar_red = tk.Button(frame_controles, text="❌ Expulsar / Rechazar", bg="#dc3545", fg="white", state="disabled", command=self.rechazar_conexion)
+        self.btn_rechazar_red.pack(side="left", padx=5)
+
+        self.btn_hacer_master = tk.Button(frame_controles, text="👑 Ceder Máster", bg="#ffc107", fg="black", state="disabled", command=self.ceder_master)
+        self.btn_hacer_master.pack(side="left", padx=5)
+
+        ttk.Separator(frame_controles, orient="vertical").pack(side="left", fill="y", padx=10)
+        
+        self.btn_intercambiar_tapiz = tk.Button(frame_controles, text="🔀 Intercambiar Tapices", bg="#6f42c1", fg="white", state="disabled", command=self.intercambiar_tapices)
+        self.btn_intercambiar_tapiz.pack(side="left", padx=5)
+
+        self.tabla_red_popup.bind("<<TreeviewSelect>>", self.evaluar_seleccion_red)
+        self.actualizar_bucle_red()
+
+    def evaluar_seleccion_red(self, event=None):
+        if not hasattr(self, 'tabla_red_popup') or not self.tabla_red_popup.winfo_exists(): return
+        sel = self.tabla_red_popup.selection()
+        
+        if len(sel) == 1:
+            item = self.tabla_red_popup.item(sel[0])
+            estado = item['values'][4]
+            es_master = "⭐" in str(item['values'][1])
+            es_yo_mismo = item['values'][0] == getattr(self, "id_conexion_red", -1)
+            
+            if es_master or es_yo_mismo:
+                self.btn_aprobar_red.config(state="disabled")
+                self.btn_rechazar_red.config(state="disabled")
+                self.btn_hacer_master.config(state="disabled")
+                self.btn_intercambiar_tapiz.config(state="disabled")
+            else:
+                self.btn_intercambiar_tapiz.config(state="disabled")
+                if estado == 'Esperando':
+                    self.btn_aprobar_red.config(state="normal")
+                    self.btn_rechazar_red.config(state="normal")
+                    self.btn_hacer_master.config(state="disabled")
+                elif estado == 'Aprobado':
+                    # CORREGIDO: Bloquea el botón "Aprobar" si ya está aprobado, igual que en Inscripción
+                    self.btn_aprobar_red.config(state="disabled") 
+                    self.btn_rechazar_red.config(state="normal")
+                    self.btn_hacer_master.config(state="normal")
+                else:
+                    self.btn_aprobar_red.config(state="disabled")
+                    self.btn_rechazar_red.config(state="disabled")
+                    self.btn_hacer_master.config(state="disabled")
+                    
+        elif len(sel) == 2:
+            self.btn_aprobar_red.config(state="disabled")
+            self.btn_rechazar_red.config(state="disabled")
+            self.btn_hacer_master.config(state="disabled")
+            
+            item1 = self.tabla_red_popup.item(sel[0])
+            item2 = self.tabla_red_popup.item(sel[1])
+            est1, est2 = item1['values'][4], item2['values'][4]
+            mas1, mas2 = "⭐" in str(item1['values'][1]), "⭐" in str(item2['values'][1])
+            
+            if est1 == 'Aprobado' and est2 == 'Aprobado' and not mas1 and not mas2:
+                self.btn_intercambiar_tapiz.config(state="normal")
+            else:
+                self.btn_intercambiar_tapiz.config(state="disabled")
+        else:
+            self.btn_aprobar_red.config(state="disabled")
+            self.btn_rechazar_red.config(state="disabled")
+            self.btn_hacer_master.config(state="disabled")
+            self.btn_intercambiar_tapiz.config(state="disabled")
+
+    def aprobar_conexion(self):
+        if not hasattr(self, 'tabla_red_popup') or not self.tabla_red_popup.winfo_exists(): return
+        sel = self.tabla_red_popup.selection()
+        if not sel: return
+        
+        item = self.tabla_red_popup.item(sel[0])
+        id_conexion = item['values'][0]
+
+        # --- LÓGICA DE ASIGNACIÓN AUTOMÁTICA EXTRAÍDA DE INSCRIPCIÓN ---
         conexiones = self.db.obtener_conexiones_torneo(self.id_torneo)
-        for item in self.tree_red.get_children(): self.tree_red.delete(item)
+        tapices_ocupados = [c['tapiz_asignado'] for c in conexiones if c['tapiz_asignado'] and c['estado_conexion'] == 'Aprobado']
         
-        for c in conexiones:
-            es_master = c.get('es_master', False)
-            mi_id = getattr(self.controller, 'id_conexion_red', None)
-            tag = "yo_mismo" if str(c['id_conexion']) == str(mi_id) else "confirmado"
-            
-            nombre_visual = f"⭐ {c['nombre']} {c['apellidos']}" if es_master else f"{c['nombre']} {c['apellidos']}"
-            tapiz_visual = "MÁSTER" if es_master else c['tapiz_asignado']
-            
-            self.tree_red.insert("", "end", values=(c['id_conexion'], nombre_visual, c['nombre_dispositivo'], tapiz_visual, c['estado_conexion']), tags=(tag,))
+        num_tapices_global = getattr(self.controller, 'num_tapices', 4)
+        tapiz_a_asignar = None
 
-    def aprobar_conexion_red(self):
-        sel = self.tree_red.selection()
-        if not sel: return
-        id_conn = getattr(self.tree_red, f"id_{sel[0]}")
-        tapiz = self.cmb_asignar_tapiz.get()
-        if "---" in tapiz: return messagebox.showwarning("Aviso", "No hay tapices adicionales configurados en este torneo.")
+        for i in range(num_tapices_global):
+            tapiz_candidato = f"Tapiz {chr(65+i)}"
+            if tapiz_candidato not in tapices_ocupados:
+                tapiz_a_asignar = tapiz_candidato
+                break
         
-        self.db.asignar_tapiz_a_cliente(id_conn, tapiz)
+        if not tapiz_a_asignar:
+            messagebox.showwarning("Sin Tapices", "No hay tapices disponibles. Por favor, asigne más tapices al torneo o expulse a un cliente.", parent=self.popup_red)
+            return
 
-    def rechazar_conexion_red(self):
-        sel = self.tree_red.selection()
+        # Aprobar y Asignar automáticamente en la DB
+        if hasattr(self.db, 'aprobar_conexion_cliente'):
+            if self.db.aprobar_conexion_cliente(id_conexion):
+                self.db.asignar_tapiz_a_cliente(id_conexion, tapiz_a_asignar)
+                self.actualizar_bucle_red()
+        else:
+            conexion = self.db.conectar()
+            if conexion:
+                try:
+                    with conexion.cursor() as cur:
+                        cur.execute("UPDATE conexiones_torneo SET estado_conexion = 'Aprobado', tapiz_asignado = %s WHERE id = %s", (tapiz_a_asignar, id_conexion,))
+                        conexion.commit()
+                except Exception: pass
+                finally: conexion.close()
+            self.actualizar_bucle_red()
+
+    def rechazar_conexion(self):
+        if not hasattr(self, 'tabla_red_popup') or not self.tabla_red_popup.winfo_exists(): return
+        sel = self.tabla_red_popup.selection()
         if not sel: return
-        id_conn = getattr(self.tree_red, f"id_{sel[0]}")
-        self.db.rechazar_conexion_cliente(id_conn)
+        
+        item = self.tabla_red_popup.item(sel[0])
+        id_conexion = item['values'][0]
+        
+        if id_conexion == getattr(self, "id_conexion_red", -1):
+            return messagebox.showerror("Error", "No puedes expulsarte a ti mismo.", parent=self.popup_red)
+
+        if messagebox.askyesno("Confirmar", "¿Expulsar / Rechazar a este cliente?", parent=self.popup_red):
+            if self.db.rechazar_conexion_cliente(id_conexion):
+                self.actualizar_bucle_red()
+
+    def ceder_master(self):
+        sel = self.tabla_red_popup.selection()
+        if not sel: return
+        
+        item = self.tabla_red_popup.item(sel[0])
+        id_conexion = item['values'][0]
+        nombre_usuario = item['values'][1]
+        estado = item['values'][4]
+        
+        if id_conexion == getattr(self, "id_conexion_red", -1):
+            return messagebox.showinfo("Aviso", "Ya eres el Director (Máster) del torneo.", parent=self.popup_red)
+            
+        if estado != 'Aprobado':
+            return messagebox.showwarning("Estado", "El cliente debe estar aprobado antes de cederle el control.", parent=self.popup_red)
+            
+        if messagebox.askyesno("Ceder Control", f"¿Está seguro de transferir los permisos de Máster a {nombre_usuario}?\n\nUsted pasará a ser un Oficial Invitado y perderá los privilegios de administración.", parent=self.popup_red):
+            if self.db.transferir_master(self.id_torneo, id_conexion):
+                self.es_master = False
+                self.controller.es_master = False
+                self.btn_gestion_red.pack_forget() 
+                self.popup_red.destroy() 
+                messagebox.showinfo("Control Cedido", "Se han transferido los permisos exitosamente.")
+                self.verificar_estado_torneo()
+
+    def intercambiar_tapices(self):
+        sel = self.tabla_red_popup.selection()
+        if len(sel) != 2: return
+        
+        item1 = self.tabla_red_popup.item(sel[0])
+        item2 = self.tabla_red_popup.item(sel[1])
+        
+        id1, tapiz1, estado1 = item1['values'][0], item1['values'][3], item1['values'][4]
+        id2, tapiz2, estado2 = item2['values'][0], item2['values'][3], item2['values'][4]
+        
+        if estado1 != 'Aprobado' or estado2 != 'Aprobado':
+            return messagebox.showwarning("Estado", "Ambos clientes deben estar aprobados para intercambiar sus tapices.", parent=self.popup_red)
+            
+        if tapiz1 == tapiz2:
+            return messagebox.showinfo("Aviso", "Ambos clientes ya están en el mismo tapiz.", parent=self.popup_red)
+
+        if self.db.asignar_tapiz_a_cliente(id1, tapiz2) and self.db.asignar_tapiz_a_cliente(id2, tapiz1):
+            self.actualizar_bucle_red()
+            messagebox.showinfo("Éxito", "Tapices intercambiados correctamente.", parent=self.popup_red)
 
     def pre_cargar_memoria(self):
         """Genera el grid de todas las llaves sin necesidad de visualizarlas."""
@@ -740,29 +935,22 @@ class PantallaPareo(ttk.Frame):
                 self.grids_generados[llave_key] = grid
 
     def verificar_estado_torneo(self):
-        """Mantiene el botón en Rojo hasta que el usuario cierre el torneo manualmente."""
-        # --- NUEVO: Dispara la actualización de la etiqueta superior en tiempo real ---
+        """Mantiene el botón en Rojo hasta que el usuario cierre el torneo manualmente, respetando roles de red."""
+        # Dispara la actualización de la etiqueta superior en tiempo real
         self.actualizar_estado_torneo()
 
-        # Si ya se cerró y se guardó en la BD, se queda en modo Exportar (Verde)
-        if getattr(self, "torneo_cerrado_en_db", False):
-            self.btn_cerrar_torneo.config(text="📄 EXPORTAR REPORTE PDF", bg="#28a745", command=self.generar_reporte_pdf)
+        # Si ya se cerró y se guardó en la BD, todos ven el botón de Exportar (Verde) y activo
+        if getattr(self, "torneo_cerrado_en_db", False) or getattr(self.controller, "torneo_finalizado", False):
+            self.btn_cerrar_torneo.config(text="📄 EXPORTAR REPORTE PDF", bg="#28a745", state="normal", command=self.generar_reporte_pdf)
             return
 
-        # Si no se ha cerrado en BD, siempre mostramos el botón de Cierre (Rojo)
-        # pero podemos habilitar/deshabilitar visualmente según si faltan peleas
-        total_divs = sum(len(p) for p in self.datos.values())
-        bloqueadas = len(self.divisiones_bloqueadas)
-        
-        pendientes = 0
-        for llave in self.divisiones_bloqueadas:
-            for r in self.grids_generados.get(llave, []):
-                for n in r:
-                    if isinstance(n, dict) and n.get("tipo") == "combate" and n.get("ganador") is None:
-                        if self.obtener_peleador_real(n["peleador_rojo"]) and self.obtener_peleador_real(n["peleador_azul"]):
-                            pendientes += 1
-
-        self.btn_cerrar_torneo.config(text="🏆 CERRAR TORNEO Y GENERAR REPORTE", bg="#ff4d4d", command=self.cerrar_torneo)
+        # Si no se ha cerrado en BD, evaluamos los roles
+        if getattr(self, "es_master", False):
+            # MODO MÁSTER: Tiene el poder de Cerrar el Torneo (Rojo)
+            self.btn_cerrar_torneo.config(text="🏆 CERRAR TORNEO Y GENERAR REPORTE", bg="#ff4d4d", state="normal", command=self.cerrar_torneo)
+        else:
+            # MODO CLIENTE (Guest): Ve el botón de Exportar, pero bloqueado hasta que el Master cierre
+            self.btn_cerrar_torneo.config(text="📄 EXPORTAR REPORTE PDF", bg="#6c757d", state="disabled")
 
     # ================= SISTEMA DE CARTELERA (ORDEN DE COMBATES) =================
     def construir_interfaz_cartelera(self):
@@ -870,7 +1058,14 @@ class PantallaPareo(ttk.Frame):
         self.btn_cerrar_torneo = tk.Button(frame_inferior, text="🏆 CERRAR TORNEO Y GENERAR REPORTE", font=("Helvetica", 12, "bold"), bg="#ff4d4d", fg="white", command=self.cerrar_torneo)
         self.btn_cerrar_torneo.pack(ipadx=15, ipady=5)
 
-        # ================= 5. EMPAQUETADO FINAL =================
+        # --- NUEVO: Botón de Buscar en Llave anclado a la derecha ANTES de la tabla ---
+        frame_btn_cartelera = ttk.Frame(self.tab_cartelera) 
+        frame_btn_cartelera.pack(side="bottom", fill="x", pady=5)
+        self.btn_buscar_en_llave = ttk.Button(frame_btn_cartelera, text="🎯 Buscar en Llave", state="disabled", command=self.buscar_seleccion_en_llave)
+        self.btn_buscar_en_llave.pack(side="right")
+
+        # ================= 5. EMPAQUETADO FINAL DE LA TABLA =================
+        # La tabla DEBE ser lo último en empacarse para no devorar a los demás widgets
         contenedor_tabla.pack(side="top", fill="both", expand=True)
         self.tree_cartelera.pack(side="top", fill="both", expand=True)
 
@@ -886,7 +1081,7 @@ class PantallaPareo(ttk.Frame):
         self.iniciar_pelea_desde_cartelera(event)
 
     def accion_clic_cartelera(self, event):
-        """Se dispara al seleccionar o deseleccionar."""
+        """Se dispara al seleccionar o deseleccionar una fila en la tabla."""
         if getattr(self, "cartelera_bloqueada", False):
             # Expulsar la selección inmediatamente para que no se vea azul
             if self.tree_cartelera.selection():
@@ -895,27 +1090,28 @@ class PantallaPareo(ttk.Frame):
             
         sel = self.tree_cartelera.selection()
         
-        # Si se deselecciona, apagamos el panel negro y el botón de búsqueda
-        if not sel: 
-            if hasattr(self, "panel_flotante") and getattr(self, "panel_flotante"):
-                getattr(self, "panel_flotante").destroy()
-            if hasattr(self, "btn_buscar_en_llave"): 
+        # Si no hay nada seleccionado (clic en el vacío)
+        if not sel:
+            self.cerrar_panel_flotante_cartelera()
+            if hasattr(self, 'btn_buscar_en_llave'): 
                 self.btn_buscar_en_llave.config(state="disabled")
             return
 
-        # Si hay selección, encendemos el botón de buscar
-        if hasattr(self, "btn_buscar_en_llave"): 
+        # Si hay algo seleccionado, encendemos el botón de buscar
+        if hasattr(self, 'btn_buscar_en_llave'): 
             self.btn_buscar_en_llave.config(state="normal")
-
-        if not getattr(self, "modo_historial", False):
-            return 
             
+        # Abrimos el panel flotante extrayendo los datos de la fila
         item_id = sel[0]
         llave_key = self.tree_cartelera.item(item_id, "text")
         match_node = getattr(self.tree_cartelera, f"nodo_{item_id}", None)
         
         if match_node:
-            self.mostrar_panel_historial_cartelera(match_node, llave_key, item_id)
+            try:
+                # Usamos tu función nativa para desplegar el panel lateral
+                self.mostrar_panel_historial_cartelera(match_node, llave_key, item_id)
+            except Exception as e:
+                print(f"Error interno al abrir el panel de la cartelera: {e}")
 
     def cerrar_panel_flotante_cartelera(self, event=None):
         """Destruye el panel superpuesto si existe."""
@@ -995,7 +1191,7 @@ class PantallaPareo(ttk.Frame):
                 ttk.Label(main_frame, text=f"Ganador: {ganador['nombre']}", foreground="#28a745", font=("Helvetica", 10, "bold")).pack()
             ttk.Label(main_frame, text=f"Método: {motivo}", foreground="#17a2b8", font=("Helvetica", 9)).pack(pady=(0, 5))
         
-        # --- BOTONES IDÉNTICOS AL PANEL DE LLAVES ---
+        # --- BOTONES INTELIGENTES SEGÚN EL ESTADO DEL COMBATE ---
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(pady=(10, 0))
         estilo_ext, peso_ext = llave_key.split("-")
@@ -1003,17 +1199,24 @@ class PantallaPareo(ttk.Frame):
         if is_rojo_fantasma or is_azul_fantasma:
             ttk.Label(btn_frame, text="Avance Automático (Sin Acta de Combate)", foreground="#17a2b8", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
         else:
-            ganador_id = match_node.get("ganador", {}).get("id")
-            motivo = match_node.get("ganador", {}).get("motivo_victoria", "")
+            ganador_data = match_node.get("ganador") or {}
+            ganador_id = ganador_data.get("id")
+            motivo = ganador_data.get("motivo_victoria", "")
 
-            if ganador_id == -1 or "DSQ" in motivo:
+            # --- CAMBIO: SI ES PENDIENTE, MOSTRAMOS EL BOTÓN "INICIAR PELEA" ---
+            if not match_node.get("ganador"):
+                ttk.Button(btn_frame, text="Iniciar Pelea", command=lambda: self.iniciar_pelea_desde_cartelera(item_id_override=item_id)).pack(side="left", padx=5)
+            # Si el combate terminó por DSQ
+            elif ganador_id == -1 or "DSQ" in motivo:
                 ttk.Label(btn_frame, text="Combate cerrado por Descalificación", foreground="#dc3545", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
+            # Si el torneo ya finalizó completamente
             elif getattr(self, "torneo_cerrado_en_db", False) or getattr(self.controller, "torneo_finalizado", False):
                 ttk.Label(btn_frame, text="Torneo Finalizado (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
+                ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: VentanaPrevisualizacionPDF(self, match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+            # Pelea normal finalizada que se puede editar
             else:
                 ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.abrir_edicion_desde_cartelera(match_node, llave_key)).pack(side="left", padx=5)
-
-            ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: VentanaPrevisualizacionPDF(self, match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
+                ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: VentanaPrevisualizacionPDF(self, match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
 
         self.panel_flotante.update_idletasks()
         ancho_panel = self.panel_flotante.winfo_reqwidth()
@@ -1044,19 +1247,20 @@ class PantallaPareo(ttk.Frame):
         for item in self.tree_cartelera.get_children():
             self.tree_cartelera.delete(item)
             
-        # --- NUEVO: LÓGICA DE BLOQUEOS ---
-        total_bloqueadas = len(self.divisiones_bloqueadas)
-        total_finalizados = sum(len(matches) for matches in self.resultados_combates.values())
+        # --- CORRECCIÓN VITAL: Sincronizar el modo ANTES de procesar ---
+        self.modo_historial = (self.filtro_cartelera.get() == "Historial")
+            
+        # LÓGICA DE BLOQUEOS
+        total_bloqueadas = len(getattr(self, "divisiones_bloqueadas", []))
+        total_finalizados = sum(len(matches) for matches in getattr(self, "resultados_combates", {}).values())
 
-        # Si no hay llaves bloqueadas, se bloquea la interacción con la cartelera
         self.cartelera_bloqueada = total_bloqueadas == 0
 
-        # Si no hay finalizados, bloqueamos el botón de Historial
         if total_finalizados == 0:
             self.rb_historial.config(state="disabled")
-            if self.filtro_cartelera.get() == "Historial":
+            if self.modo_historial:
                 self.filtro_cartelera.set("Pendientes")
-                self.modo_historial = False
+                self.modo_historial = False # Lo forzamos a Pendientes
         else:
             self.rb_historial.config(state="normal")
             
@@ -1184,7 +1388,7 @@ class PantallaPareo(ttk.Frame):
             self.tree_cartelera.item(str(idx), text=c['llave_key'])
             setattr(self.tree_cartelera, f"nodo_{idx}", c['nodo_combate'])
 
-    def iniciar_pelea_desde_cartelera(self, event):
+    def iniciar_pelea_desde_cartelera(self, event=None, item_id_override=None):
         # 1. --- VALIDACIÓN DE SEGURIDAD MEJORADA ---
         total_divisiones = sum(len(pesos) for pesos in self.datos.values())
         if len(self.divisiones_bloqueadas) < total_divisiones:
@@ -1192,7 +1396,8 @@ class PantallaPareo(ttk.Frame):
             return messagebox.showwarning("Llaves Pendientes", 
                 f"No se puede iniciar la competencia.\n\nAún faltan {faltantes} categorías de peso por confirmar y bloquear.")
 
-        item_id = self.tree_cartelera.focus()
+        # --- CAMBIO: Usamos el ID forzado del botón si existe, o el foco actual ---
+        item_id = item_id_override or self.tree_cartelera.focus()
         if not item_id: return
         
         # ---> NUEVO: Bloquear si ya está en amarillo <---
