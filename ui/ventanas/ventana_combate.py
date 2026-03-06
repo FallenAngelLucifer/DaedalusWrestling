@@ -3,7 +3,7 @@ from tkinter import ttk, messagebox
 from utils.utilidades import aplicar_autocompletado, ComboBuscador
 
 class VentanaCombate(tk.Toplevel):
-    def __init__(self, parent, match_node, p_rojo, p_azul, callback_ganador, callback_cancelar=None, num_tapices=1):
+    def __init__(self, parent, match_node, p_rojo, p_azul, callback_ganador, callback_cancelar=None, callback_latido=None, num_tapices=1):
         super().__init__(parent)
         self.parent = parent
         self.match_node = match_node
@@ -11,6 +11,7 @@ class VentanaCombate(tk.Toplevel):
         self.p_azul = p_azul
         self.callback_ganador = callback_ganador
         self.callback_cancelar = callback_cancelar # Intercepta el cierre
+        self.callback_latido = callback_latido # <-- NUEVO
         self.num_tapices = num_tapices
         
         # Bloquear el cierre natural de la ventana con la "X" roja
@@ -101,7 +102,20 @@ class VentanaCombate(tk.Toplevel):
         
         self.crear_interfaz()
         self.actualizar_reloj_visual() 
+
+        # --- NUEVO: Bandera de seguridad para cierres forzados ---
+        self.combate_finalizado_legalmente = False
+
+        self.bucle_latido_combate() # <-- NUEVO: Iniciar el corazón de la ventana
         
+    def bucle_latido_combate(self):
+        """Envía una señal periódica a la BD para avisar que el combate sigue en progreso visualmente."""
+        if not getattr(self, 'combate_finalizado_legalmente', False):
+            if self.callback_latido:
+                self.callback_latido()
+            # Se repite cada 3 segundos (3000ms), dándole margen holgado al limpiador de 8 segundos
+            self.after(3000, self.bucle_latido_combate)
+
     def crear_interfaz(self):
         # ================= ENCABEZADO =================
         header = tk.Frame(self, bg="#2a2a2a", height=60)
@@ -475,9 +489,51 @@ class VentanaCombate(tk.Toplevel):
         
         ttk.Label(dialogo, text=f"Ganador: {peleador['nombre']}", font=("Helvetica", 12, "bold")).pack(pady=10)
         ttk.Label(dialogo, text="Seleccione el motivo de la victoria:").pack(pady=5)
-        cmb_motivo = ComboBuscador(dialogo, values=self.tipos_victoria, state="readonly", width=50)
+        
+        # --- NUEVO: OBTENER PUNTOS DE AMBOS ---
+        puntos_rojo = self.score_rojo.get()
+        puntos_azul = self.score_azul.get()
+        
+        if peleador == self.p_rojo:
+            puntos_ganador = puntos_rojo
+            puntos_perdedor = puntos_azul
+        else:
+            puntos_ganador = puntos_azul
+            puntos_perdedor = puntos_rojo
+        
+        # Opciones base (Casi siempre disponibles, excepto Forfeit)
+        opciones_validas = [
+            "VFA - Victoria por Toque (Fall)",
+            "VAB - Victoria por Abandono",
+            "VIN - Victoria por Lesión",
+            "DSQ - Descalificación por mala conducta",
+            "VCA - Victoria por Amonestaciones (3 cautions)"
+        ]
+        
+        # Escenario 1: Ninguno anotó (0 - 0)
+        if puntos_ganador == 0 and puntos_perdedor == 0:
+            opciones_validas.extend([
+                "VFO - Victoria por Forfeit (Incomparecencia)",
+                "VPO - Victoria por Puntos (sin puntos del perdedor)" # Ganador por criterio
+            ])
+            
+        # Escenario 2: El perdedor anotó al menos 1 punto (Ambos anotaron, o va ganando el perdedor)
+        elif puntos_perdedor > 0:
+            opciones_validas.extend([
+                "VSU1 - Superioridad Técnica (con puntos del perdedor)",
+                "VPO1 - Victoria por Puntos (con puntos del perdedor)"
+            ])
+            
+        # Escenario 3: Solo el ganador anotó (Perdedor en 0)
+        elif puntos_perdedor == 0 and puntos_ganador > 0:
+            opciones_validas.extend([
+                "VSU - Superioridad Técnica (sin puntos del perdedor)",
+                "VPO - Victoria por Puntos (sin puntos del perdedor)"
+            ])
+
+        cmb_motivo = ComboBuscador(dialogo, values=opciones_validas, state="readonly", width=50)
         cmb_motivo.pack(pady=10)
-        cmb_motivo.set(self.tipos_victoria[0]) 
+        cmb_motivo.set(opciones_validas[0])
         
         def confirmar():
             motivo = cmb_motivo.get()
@@ -495,6 +551,7 @@ class VentanaCombate(tk.Toplevel):
             # Enviar tooooda la información a la pantalla de brackets
             self.callback_ganador(self.match_node['match_id'], peleador, motivo, id_arb, id_jue, id_jef, historial_limpio, totales)
             dialogo.destroy()
+            self.combate_finalizado_legalmente = True
             self.destroy() 
             
         ttk.Button(dialogo, text="Confirmar y Finalizar", command=confirmar).pack(pady=15)
@@ -514,6 +571,7 @@ class VentanaCombate(tk.Toplevel):
             totales = {'rojo': self.score_rojo.get(), 'azul': self.score_azul.get()}
             
             self.callback_ganador(self.match_node['match_id'], ganador_dsq, motivo, id_arb, id_jue, id_jef, historial_limpio, totales)
+            self.combate_finalizado_legalmente = True
             self.destroy()
     
     def intentar_cerrar(self):
@@ -525,4 +583,28 @@ class VentanaCombate(tk.Toplevel):
         if respuesta:
             if self.callback_cancelar:
                 self.callback_cancelar()
+            
+            self.combate_finalizado_legalmente = True
             self.destroy()
+
+    def destroy(self):
+        """Sobrescribe la destrucción del widget para evitar combates fantasma."""
+        # Si la ventana está siendo destruida pero NO levantamos la bandera legal...
+        if not getattr(self, 'combate_finalizado_legalmente', False):
+            try:
+                # Opcion 1: Intentar usar el callback (Puede fallar si la ventana principal ya se está destruyendo)
+                if self.callback_cancelar:
+                    self.callback_cancelar()
+            except Exception:
+                # Opcion 2: Failsafe directo a la Base de Datos.
+                # Como la UI padre está muriendo, vamos directo al motor de la DB.
+                # NOTA: Cambia "liberar_estado_combate" por el nombre real de tu función en la DB.
+                if hasattr(self.parent, 'db'):
+                    try:
+                        self.parent.db.ejecutar_query("UPDATE combates SET estado = 'Pendiente' WHERE id = ?", (self.match_node['match_id'],))
+                        # O si tienes una función específica: self.parent.db.liberar_combate(self.match_node['match_id'])
+                    except Exception as e:
+                        print(f"Error al liberar combate de emergencia: {e}")
+        
+        # Continuar con la destrucción normal de la ventana en Tkinter
+        super().destroy()

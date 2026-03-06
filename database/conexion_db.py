@@ -969,7 +969,7 @@ class ConexionDB:
     # --- SISTEMA DE CANDADOS EN RED (COMBATES EN CURSO) ---
     # =================================================================
     def marcar_combate_en_curso(self, id_torneo, llave_key, match_id, tapiz):
-        """Bloquea un combate de forma estricta. Si ya está bloqueado por otro, retorna False."""
+        """Bloquea un combate de forma estricta tras limpiar zombis."""
         conexion = self.conectar()
         if not conexion: return False
         try:
@@ -977,22 +977,24 @@ class ConexionDB:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS combates_activos (
                         id_torneo INT, llave_key VARCHAR(100), match_id VARCHAR(50), tapiz VARCHAR(50),
+                        ultima_actividad TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (id_torneo, llave_key, match_id)
                     );
                 """)
+                cur.execute("ALTER TABLE combates_activos ADD COLUMN IF NOT EXISTS ultima_actividad TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
                 
-                # Intentar insertar. Si ya existe, NO HACER NADA
+                # LA MAGIA 1: Purga preventiva de combates que dejaron de latir hace 8 segundos
+                cur.execute("DELETE FROM combates_activos WHERE CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '8 seconds';")
+                
                 cur.execute("""
-                    INSERT INTO combates_activos (id_torneo, llave_key, match_id, tapiz) 
-                    VALUES (%s, %s, %s, %s) 
+                    INSERT INTO combates_activos (id_torneo, llave_key, match_id, tapiz, ultima_actividad) 
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP) 
                     ON CONFLICT (id_torneo, llave_key, match_id) DO NOTHING;
                 """, (id_torneo, llave_key, match_id, tapiz))
                 
-                # Si no se insertó ninguna fila, significa que alguien más nos ganó el candado
                 if cur.rowcount == 0:
                     cur.execute("SELECT tapiz FROM combates_activos WHERE id_torneo = %s AND llave_key = %s AND match_id = %s", (id_torneo, llave_key, match_id))
                     res = cur.fetchone()
-                    # Si el tapiz registrado es distinto al mío, denegar el acceso
                     if res and res[0] != tapiz:
                         return False
                         
@@ -1009,24 +1011,29 @@ class ConexionDB:
         return self._ejecutar_insert("DELETE FROM combates_activos WHERE id_torneo = %s AND llave_key = %s AND match_id = %s;", (id_torneo, llave_key, match_id))
 
     def obtener_combates_en_curso(self, id_torneo):
-        """Devuelve un diccionario con todos los combates que están siendo operados en la red."""
+        """Devuelve todos los combates que están siendo operados y purga inactivos."""
         conexion = self.conectar()
         if not conexion: return {}
         try:
             with conexion.cursor() as cur:
-                # Nos aseguramos de que la tabla exista para evitar el error 'relation does not exist'
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS combates_activos (
                         id_torneo INT, llave_key VARCHAR(100), match_id VARCHAR(50), tapiz VARCHAR(50),
+                        ultima_actividad TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (id_torneo, llave_key, match_id)
                     );
                 """)
+                cur.execute("ALTER TABLE combates_activos ADD COLUMN IF NOT EXISTS ultima_actividad TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+                
+                # LA MAGIA 2: Purga activa para la cartelera de todos los clientes de la red
+                cur.execute("DELETE FROM combates_activos WHERE CURRENT_TIMESTAMP - ultima_actividad > INTERVAL '8 seconds';")
+                conexion.commit() # Aseguramos que la red entera vea la limpieza
+
                 cur.execute("SELECT llave_key, match_id, tapiz FROM combates_activos WHERE id_torneo = %s;", (id_torneo,))
                 res = cur.fetchall()
                 activos = {}
                 if res:
                     for r in res:
-                        # Soporte para tuplas o RealDictCursor
                         lk = r['llave_key'] if isinstance(r, dict) else r[0]
                         mi = r['match_id'] if isinstance(r, dict) else r[1]
                         tp = r['tapiz'] if isinstance(r, dict) else r[2]
@@ -1088,6 +1095,25 @@ class ConexionDB:
                 return True
         except Exception as e:
             print(f"Error en latido de red: {e}")
+            return False
+        finally:
+            conexion.close()
+
+    def mantener_latido_combate(self, id_torneo, llave_key, match_id):
+        """Mantiene vivo el candado del combate enviando un pulso de tiempo."""
+        conexion = self.conectar()
+        if not conexion: return False
+        try:
+            with conexion.cursor() as cur:
+                cur.execute("""
+                    UPDATE combates_activos 
+                    SET ultima_actividad = CURRENT_TIMESTAMP 
+                    WHERE id_torneo = %s AND llave_key = %s AND match_id = %s;
+                """, (id_torneo, llave_key, match_id))
+                conexion.commit()
+                return True
+        except Exception as e:
+            print(f"Error en latido de combate: {e}")
             return False
         finally:
             conexion.close()

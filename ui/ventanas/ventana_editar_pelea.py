@@ -153,9 +153,10 @@ class VentanaEditarPelea(tk.Toplevel):
         self.cmb_ganador = ComboBuscador(frame_resultados, values=[self.p_rojo['nombre'], self.p_azul['nombre']], state="readonly", width=25)
         self.cmb_ganador.grid(row=3, column=1, columnspan=2, sticky="w", pady=(15, 5))
         
-        # --- NUEVO: Extraer los datos del ganador para esta función ---
-        ganador_data = self.match_node.get("ganador", {})
+        # --- NUEVO: VINCULAR EVENTO ---
+        self.cmb_ganador.bind("<<ComboboxSelected>>", self.actualizar_opciones_victoria)
         
+        ganador_data = self.match_node.get("ganador", {})
         if ganador_data: self.cmb_ganador.set(ganador_data.get("nombre", ""))
 
         ttk.Label(frame_resultados, text="Tipo de Victoria:", font=("Helvetica", 10, "bold")).grid(row=4, column=0, sticky="w", pady=5)
@@ -166,7 +167,9 @@ class VentanaEditarPelea(tk.Toplevel):
             self.cmb_victoria.set(ganador_data["motivo_victoria"])
 
         aplicar_autocompletado(self.cmb_ganador, [self.p_rojo['nombre'], self.p_azul['nombre']])
-        aplicar_autocompletado(self.cmb_victoria, self.tipos_victoria)
+
+        # --- NUEVO: EJECUTAR AL INICIO ---
+        self.actualizar_opciones_victoria()
 
         # --- BOTONES FINALES ---
         botones_frame = tk.Frame(self)
@@ -221,3 +224,54 @@ class VentanaEditarPelea(tk.Toplevel):
 
         self.callback_actualizar(self.match_node, ganador_dict, motivo_nuevo, self.tab, self.llave_key, id_arb, id_jue, id_jef, None, totales)
         self.destroy()
+
+    def actualizar_opciones_victoria(self, event=None):
+        ganador_seleccionado = self.cmb_ganador.get()
+        if not ganador_seleccionado:
+            return
+
+        # Determinar los puntos del ganador y perdedor
+        if ganador_seleccionado == self.p_rojo['nombre']:
+            puntos_ganador = self.total_r
+            puntos_perdedor = self.total_a
+        else:
+            puntos_ganador = self.total_a
+            puntos_perdedor = self.total_r
+
+        # Opciones base
+        opciones_validas = [
+            "VFA - Victoria por Toque (Fall)",
+            "VAB - Victoria por Abandono",
+            "VIN - Victoria por Lesión",
+            "DSQ - Descalificación por mala conducta",
+            "VCA - Victoria por Amonestaciones (3 cautions)"
+        ]
+
+        # Escenario 1: Ninguno anotó (0 - 0)
+        if puntos_ganador == 0 and puntos_perdedor == 0:
+            opciones_validas.extend([
+                "VFO - Victoria por Forfeit (Incomparecencia)",
+                "VPO - Victoria por Puntos (sin puntos del perdedor)"
+            ])
+            
+        # Escenario 2: El perdedor anotó al menos 1 punto
+        elif puntos_perdedor > 0:
+            opciones_validas.extend([
+                "VSU1 - Superioridad Técnica (con puntos del perdedor)",
+                "VPO1 - Victoria por Puntos (con puntos del perdedor)"
+            ])
+            
+        # Escenario 3: Solo el ganador anotó
+        elif puntos_perdedor == 0 and puntos_ganador > 0:
+            opciones_validas.extend([
+                "VSU - Superioridad Técnica (sin puntos del perdedor)",
+                "VPO - Victoria por Puntos (sin puntos del perdedor)"
+            ])
+
+        valor_actual = self.cmb_victoria.get()
+        self.cmb_victoria.config(values=opciones_validas)
+        aplicar_autocompletado(self.cmb_victoria, opciones_validas)
+
+        # Si el valor actual no coincide con la nueva realidad, se limpia y se pone el primero de la lista
+        if valor_actual not in opciones_validas:
+            self.cmb_victoria.set(opciones_validas[0] if opciones_validas else "")

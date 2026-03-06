@@ -783,17 +783,21 @@ class PantallaPareo(ttk.Frame):
 
     # ================= SISTEMA DE CARTELERA (ORDEN DE COMBATES) =================
     def construir_interfaz_cartelera(self):
-        # --- 1. TÍTULO DINÁMICO (Guardamos la referencia) ---
-        self.lbl_titulo_cartelera = ttk.Label(self.tab_cartelera, text="Orden de Combates Sugerido (Por Fases)", font=("Helvetica", 12, "bold"))
-        self.lbl_titulo_cartelera.pack(pady=(0, 5))
+        # --- 1. SUB-PESTAÑAS (Navegación Cartelera) ---
+        self.filtro_cartelera = tk.StringVar(value="Pendientes")
+
+        nav_frame = ttk.Frame(self.tab_cartelera)
+        nav_frame.pack(fill="x", pady=(0, 5))
+
+        ttk.Radiobutton(nav_frame, text="🟢 Combates Activos / Pendientes", variable=self.filtro_cartelera, value="Pendientes", command=self.actualizar_cartelera, style="Toolbutton").pack(side="left", padx=5)
+        ttk.Radiobutton(nav_frame, text="📜 Historial de Combates", variable=self.filtro_cartelera, value="Historial", command=self.actualizar_cartelera, style="Toolbutton").pack(side="left", padx=5)
 
         # --- 2. CONTENEDOR DE CABECERA (Alterna entre Modos) ---
         self.header_cartelera = ttk.Frame(self.tab_cartelera)
         self.header_cartelera.pack(fill="x", pady=5)
 
-        # ================= MODO 1: ORDENAMIENTO (Por defecto) =================
+        # ================= MODO 1: ORDENAMIENTO (Pendientes) =================
         self.frame_orden = ttk.Frame(self.header_cartelera)
-        self.frame_orden.pack(side="left", fill="x", expand=True)
         
         ttk.Label(self.frame_orden, text="Modo de Ordenamiento:").pack(side="left", padx=5)
         self.combo_orden_cartelera = ComboBuscador(self.frame_orden, values=[
@@ -805,14 +809,12 @@ class PantallaPareo(ttk.Frame):
         
         self.combo_orden_cartelera.bind("<<ComboboxSelected>>", lambda e: self.actualizar_cartelera())
 
-        # ================= MODO 2: HISTORIAL (Oculto al inicio) =================
+        # ================= MODO 2: HISTORIAL (Terminados) =================
         self.frame_historial = ttk.Frame(self.header_cartelera)
         
-        # Estadísticas alineadas a la izquierda
         self.lbl_stats_historial = ttk.Label(self.frame_historial, text="Peleas: 0  |  Rondas: 0  |  Atletas: 0  |  Clubes: 0", foreground="#17a2b8", font=("Helvetica", 9, "bold"))
         self.lbl_stats_historial.pack(side="left", padx=10)
 
-        # Buscador alineado a la derecha
         frame_busqueda = ttk.Frame(self.frame_historial)
         frame_busqueda.pack(side="right", padx=10)
         
@@ -824,14 +826,12 @@ class PantallaPareo(ttk.Frame):
         self.ent_buscar_historial = ttk.Entry(frame_busqueda, width=25)
         self.ent_buscar_historial.pack(side="left", padx=5)
         
-        # Eventos del buscador inteligente
         self.ent_buscar_historial.bind("<KeyRelease>", lambda e: self.actualizar_cartelera())
         self.cmb_buscar_historial.bind("<<ComboboxSelected>>", lambda e: [self.ent_buscar_historial.delete(0, tk.END), self.actualizar_cartelera()])
 
         # ================= 3. INICIO DE LA TABLA PERSONALIZADA =================
         contenedor_tabla = ttk.Frame(self.tab_cartelera)
 
-        # FALSO ENCABEZADO
         header_frame = tk.Frame(contenedor_tabla, height=30)
         header_frame.pack(fill="x")
         header_frame.pack_propagate(False)
@@ -843,7 +843,7 @@ class PantallaPareo(ttk.Frame):
             tk.Label(celda, text=texto, bg=bg_color, fg="white", font=("Helvetica", 10, "bold")).pack(expand=True)
 
         crear_celda_header("Ronda", 80, "#2a2a2a")
-        crear_celda_header("Tapiz", 80, "#2a2a2a") # <-- NUEVO: Encabezado Tapiz
+        crear_celda_header("Tapiz", 80, "#2a2a2a") 
         crear_celda_header("Estilo", 120, "#2a2a2a")
         crear_celda_header("División", 100, "#2a2a2a")
         crear_celda_header("Esquina Roja", 350, "#cc0000") 
@@ -852,14 +852,13 @@ class PantallaPareo(ttk.Frame):
         filler = tk.Frame(header_frame, bg="#2a2a2a", highlightbackground="#555555", highlightthickness=1)
         filler.pack(side="left", fill="both", expand=True)
 
-        # TABLA DE DATOS
-        columnas = ("ronda", "tapiz", "estilo", "peso", "rojo", "azul") # <-- NUEVO: Columna tapiz
+        columnas = ("ronda", "tapiz", "estilo", "peso", "rojo", "azul") 
         self.tree_cartelera = ttk.Treeview(contenedor_tabla, columns=columnas, show="", height=20)
         aplicar_deseleccion_tabla(self.tree_cartelera)
         self.tree_cartelera.column("#0", width=0, stretch=tk.NO) 
         
         self.tree_cartelera.column("ronda", width=80, anchor="center", stretch=False)
-        self.tree_cartelera.column("tapiz", width=80, anchor="center", stretch=False) # <-- NUEVO: Ancho columna
+        self.tree_cartelera.column("tapiz", width=80, anchor="center", stretch=False) 
         self.tree_cartelera.column("estilo", width=120, anchor="center", stretch=False)
         self.tree_cartelera.column("peso", width=100, anchor="center", stretch=False)
         self.tree_cartelera.column("rojo", width=350, stretch=False)
@@ -867,12 +866,9 @@ class PantallaPareo(ttk.Frame):
         
         self.tree_cartelera.bind("<Double-1>", self.accion_doble_clic_cartelera)
         self.tree_cartelera.bind("<<TreeviewSelect>>", self.accion_clic_cartelera)
-
-        # --- NUEVO: Configurar color amarillo para combates en curso ---
         self.tree_cartelera.tag_configure("en_curso", background="#ffc107", foreground="black")
 
-        # --- EVENTOS DE CIERRE DEL PANEL FLOTANTE ---
-        self.tree_cartelera.bind("<Button-1>", self.evaluar_cierre_flotante, add="+") # <-- NUEVO DETECTOR
+        self.tree_cartelera.bind("<Button-1>", self.evaluar_cierre_flotante, add="+")
         self.tree_cartelera.bind("<MouseWheel>", self.cerrar_panel_flotante_cartelera, add="+")
         self.tree_cartelera.bind("<Button-4>", self.cerrar_panel_flotante_cartelera, add="+")
         self.tree_cartelera.bind("<Button-5>", self.cerrar_panel_flotante_cartelera, add="+")
@@ -891,7 +887,6 @@ class PantallaPareo(ttk.Frame):
         contenedor_tabla.pack(side="top", fill="both", expand=True)
         self.tree_cartelera.pack(side="top", fill="both", expand=True)
 
-        # --- CORREGIDO: Botón Buscar en Llave (Anclado al tab correcto) ---
         frame_btn_cartelera = ttk.Frame(self.tab_cartelera) 
         frame_btn_cartelera.pack(fill="x", pady=5)
         self.btn_buscar_en_llave = ttk.Button(frame_btn_cartelera, text="🎯 Buscar en Llave", state="disabled", command=self.buscar_seleccion_en_llave)
@@ -953,31 +948,26 @@ class PantallaPareo(ttk.Frame):
             self.cerrar_panel_flotante_cartelera()
 
     def mostrar_panel_historial_cartelera(self, match_node, llave_key, item_id):
-        self.cerrar_panel_flotante_cartelera() # Limpiar panel previo
+        self.cerrar_panel_flotante_cartelera() 
 
-        # Obtener coordenadas de la fila clicada (X, Y, Ancho, Alto)
         bbox = self.tree_cartelera.bbox(item_id)
-        if not bbox: return # Si la fila no es visible en pantalla, abortar
+        if not bbox: return 
 
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         
-        # --- CREAR EL PANEL FLOTANTE SOBRE EL TREEVIEW ---
         self.panel_flotante = tk.Frame(self.tree_cartelera, bg="#2d2d2d", highlightbackground="gray", highlightthickness=1)
         
-        # --- ENCABEZADO (SIN BOTÓN X) ---
         top_bar = tk.Frame(self.panel_flotante, bg="#1e1e1e")
         top_bar.pack(fill="x")
         ttk.Label(top_bar, text=f"Detalles del Combate (Ronda {match_node['ronda']})", font=("Helvetica", 10, "bold"), background="#1e1e1e", foreground="white").pack(pady=5)
         
-        # --- CUERPO DEL PANEL (Mismo diseño que las llaves) ---
         main_frame = ttk.Frame(self.panel_flotante, padding=10)
         main_frame.pack(fill="both", expand=True)
         
         frame_vs = ttk.Frame(main_frame)
         frame_vs.pack(pady=5)
         
-        # Detección de Descalificaciones Previas
         is_rojo_fantasma = p_rojo and p_rojo.get("id") == -1
         is_azul_fantasma = p_azul and p_azul.get("id") == -1
         
@@ -998,7 +988,8 @@ class PantallaPareo(ttk.Frame):
             ttk.Label(frame_vs, text=nom_azul, foreground="#6666ff", font=("Helvetica", 10, "bold")).grid(row=0, column=2, padx=5)
         
         estado = "Finalizado" if match_node.get("ganador") else "Pendiente"
-        ttk.Label(main_frame, text=f"Estado: {estado}", foreground="#28a745", font=("Helvetica", 9, "bold")).pack(pady=(10, 2))
+        color_estado = "#28a745" if estado == "Finalizado" else "#ffc107"
+        ttk.Label(main_frame, text=f"Estado: {estado}", foreground=color_estado, font=("Helvetica", 9, "bold")).pack(pady=(10, 2))
         
         if match_node.get("ganador"):
             ganador = match_node["ganador"]
@@ -1011,7 +1002,7 @@ class PantallaPareo(ttk.Frame):
                 ttk.Label(main_frame, text=f"Ganador: {ganador['nombre']}", foreground="#28a745", font=("Helvetica", 10, "bold")).pack()
             ttk.Label(main_frame, text=f"Método: {motivo}", foreground="#17a2b8", font=("Helvetica", 9)).pack(pady=(0, 5))
         
-        # Botones (Modo Historial - Solo Lectura)
+        # --- BOTONES IDÉNTICOS AL PANEL DE LLAVES ---
         btn_frame = ttk.Frame(main_frame)
         btn_frame.pack(pady=(10, 0))
         estilo_ext, peso_ext = llave_key.split("-")
@@ -1019,27 +1010,28 @@ class PantallaPareo(ttk.Frame):
         if is_rojo_fantasma or is_azul_fantasma:
             ttk.Label(btn_frame, text="Avance Automático (Sin Acta de Combate)", foreground="#17a2b8", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
         else:
-            ttk.Label(btn_frame, text="Registro Histórico (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
+            ganador_id = match_node.get("ganador", {}).get("id")
+            motivo = match_node.get("ganador", {}).get("motivo_victoria", "")
+
+            if ganador_id == -1 or "DSQ" in motivo:
+                ttk.Label(btn_frame, text="Combate cerrado por Descalificación", foreground="#dc3545", font=("Helvetica", 9, "bold")).pack(side="left", padx=5)
+            elif getattr(self, "torneo_cerrado_en_db", False) or getattr(self.controller, "torneo_finalizado", False):
+                ttk.Label(btn_frame, text="Torneo Finalizado (Solo Lectura)", foreground="#17a2b8", font=("Helvetica", 9, "italic")).pack(side="left", padx=5)
+            else:
+                ttk.Button(btn_frame, text="Editar Pelea", command=lambda: self.abrir_edicion_desde_cartelera(match_node, llave_key)).pack(side="left", padx=5)
+
             ttk.Button(btn_frame, text="👁 Ver Datos", command=lambda: VentanaPrevisualizacionPDF(self, match_node, estilo_ext, peso_ext)).pack(side="left", padx=5)
 
-        # --- CÁLCULO DE POSICIÓN MÁGICA (Debajo de la fila) ---
         self.panel_flotante.update_idletasks()
         ancho_panel = self.panel_flotante.winfo_reqwidth()
         alto_panel = self.panel_flotante.winfo_reqheight()
         
         x_pos = (self.tree_cartelera.winfo_width() // 2) - (ancho_panel // 2)
-        y_pos = bbox[1] + bbox[3] # Justo debajo del borde inferior de la fila
+        y_pos = bbox[1] + bbox[3] 
         
-        # Inteligencia de bordes: Si choca abajo, lo desplegamos hacia arriba de la fila
         if y_pos + alto_panel > self.tree_cartelera.winfo_height():
             y_pos = bbox[1] - alto_panel
             
-        # --- NUEVO: Botón de Edición si el torneo no ha finalizado ---
-        torneo_terminado = getattr(self.controller, "torneo_finalizado", getattr(self, "torneo_finalizado", False))
-        if not torneo_terminado:
-            tk.Button(self.panel_flotante, text="✏️ Editar Combate", bg="#ffc107", fg="black", font=("Helvetica", 9, "bold"), 
-                      command=lambda: self.abrir_edicion_desde_cartelera(match_node, llave_key)).pack(pady=(10, 5), fill="x", padx=10)
-
         self.panel_flotante.place(x=max(10, x_pos), y=y_pos)
 
     def al_cambiar_pestana(self, event):
@@ -1054,22 +1046,16 @@ class PantallaPareo(ttk.Frame):
             self.procesar_y_dibujar(tab)
 
     def actualizar_cartelera(self, event=None):
-        self.cerrar_panel_flotante_cartelera() # <-- NUEVO: Borra el panel antes de recargar la tabla
+        self.cerrar_panel_flotante_cartelera() 
 
-        # Limpiar tabla
         for item in self.tree_cartelera.get_children():
             self.tree_cartelera.delete(item)
             
         todas_peleas = []
-        total_peleas = 0
-        completadas = 0
         
-        # 1. Recopilar todos los combates de las llaves bloqueadas
         for llave_key in self.divisiones_bloqueadas:
             grid = self.grids_generados.get(llave_key, [])
             estilo, peso_str = llave_key.split("-")
-            
-            # --- CORRECCIÓN CRÍTICA: Parseo de peso a prueba de fallos ---
             peso_int = int(peso_str.lower().replace("kg", "").replace(" ", "").strip())
             prio_estilo = 0 if "Femenina" in estilo else 1
 
@@ -1080,11 +1066,7 @@ class PantallaPareo(ttk.Frame):
                         p_azul = self.obtener_peleador_real(node["peleador_azul"])
                         
                         if p_rojo and p_azul:
-                            total_peleas += 1
                             is_terminada = node.get("ganador") is not None
-                            if is_terminada: completadas += 1
-                            
-                            # --- NUEVO: Detectar si el combate está activo en red ---
                             tapiz_activo = getattr(self, 'combates_en_curso_red', {}).get(llave_key, {}).get(node.get("match_id"))
                             
                             todas_peleas.append({
@@ -1102,27 +1084,29 @@ class PantallaPareo(ttk.Frame):
                                 "nodo_combate": node,
                                 "llave_key": llave_key,
                                 "terminada": is_terminada,
-                                "tapiz_activo": tapiz_activo # <--- NUEVO
+                                "tapiz_activo": tapiz_activo 
                             })
                             
-        # 2. Evaluar Estado: ¿Estamos en modo Historial?
-        self.modo_historial = (total_peleas > 0 and completadas == total_peleas) or getattr(self, "torneo_cerrado_en_db", False)
+        # Evaluamos qué vista quiere el usuario
+        self.modo_historial = (self.filtro_cartelera.get() == "Historial")
         
         if self.modo_historial:
             # === MODO HISTORIAL ===
-            self.lbl_titulo_cartelera.config(text="Historial de Combates (Por Fases)")
             self.frame_orden.pack_forget()
             if not self.frame_historial.winfo_ismapped():
                 self.frame_historial.pack(side="left", fill="x", expand=True)
             if hasattr(self, 'lbl_hint_cartelera'): 
                 self.lbl_hint_cartelera.pack_forget()
             
+            # Filtrar solo los terminados
+            combates_base = [c for c in todas_peleas if c['terminada']]
+            
             # Aplicar Filtros de Búsqueda
             search_term = self.ent_buscar_historial.get().lower().strip()
             search_by = self.cmb_buscar_historial.get()
             
             combates_mostrar = []
-            for c in todas_peleas:
+            for c in combates_base:
                 if search_term:
                     if search_by == "Atleta" and (search_term in c['nom_rojo'].lower() or search_term in c['nom_azul'].lower()): combates_mostrar.append(c)
                     elif search_by == "Club" and (search_term in c['club_rojo'].lower() or search_term in c['club_azul'].lower()): combates_mostrar.append(c)
@@ -1132,27 +1116,25 @@ class PantallaPareo(ttk.Frame):
                 else:
                     combates_mostrar.append(c)
                     
-            # Calcular y Mostrar Estadísticas a la izquierda
             rondas_unicas = len(set(c['ronda'] for c in combates_mostrar))
             ids_atletas = set([c['id_rojo'] for c in combates_mostrar] + [c['id_azul'] for c in combates_mostrar])
             ids_clubes = set([c['club_rojo'] for c in combates_mostrar] + [c['club_azul'] for c in combates_mostrar])
-            if "Sin Club" in ids_clubes: ids_clubes.remove("Sin Club") # Limpiar genéricos
+            if "Sin Club" in ids_clubes: ids_clubes.remove("Sin Club") 
             
             self.lbl_stats_historial.config(text=f"Peleas: {len(combates_mostrar)}  |  Rondas: {rondas_unicas}  |  Atletas: {len(ids_atletas)}  |  Clubes: {len(ids_clubes)}")
             
-            # Ordenar para historial (cronológico de torneo)
             combates_mostrar.sort(key=lambda x: (x["ronda"], x["prio_estilo"], x["peso_int"]))
             cartelera_final = combates_mostrar
             
         else:
             # === MODO NORMAL (PENDIENTES) ===
-            self.lbl_titulo_cartelera.config(text="Orden de Combates Sugerido (Por Fases)")
             self.frame_historial.pack_forget()
             if not self.frame_orden.winfo_ismapped():
                 self.frame_orden.pack(side="left", fill="x", expand=True)
             if hasattr(self, 'lbl_hint_cartelera') and not self.lbl_hint_cartelera.winfo_ismapped():
                 self.lbl_hint_cartelera.pack(pady=(0, 5), before=self.btn_cerrar_torneo)
             
+            # Filtrar solo los pendientes
             combates_pendientes = [c for c in todas_peleas if not c['terminada']]
             
             modo_seleccionado = getattr(self, "combo_orden_cartelera", None)
@@ -1161,7 +1143,6 @@ class PantallaPareo(ttk.Frame):
             else:
                 combates_pendientes.sort(key=lambda x: (x["ronda"], x["peso_int"], x["prio_estilo"]))
             
-            # Algoritmo de Separación (Descanso)
             cartelera_final = []
             registro_descanso = {} 
             separacion_ideal = 3 
@@ -1181,15 +1162,11 @@ class PantallaPareo(ttk.Frame):
                 registro_descanso[elegido["id_rojo"]] = indice_actual
                 registro_descanso[elegido["id_azul"]] = indice_actual
 
-        # 3. Insertar la cartelera ya optimizada en la tabla visual
         for idx, c in enumerate(cartelera_final):
-            # Asignar texto de tapiz N.A o Tapiz X
             tapiz_str = c['tapiz_activo'] if c['tapiz_activo'] else "N.A."
-            
-            # Asignar tags de control
             tags_fila = [c['llave_key'], str(c['nodo_combate'])]
             if c['tapiz_activo']:
-                tags_fila.append("en_curso") # Esto lo pintará de amarillo y bloqueará el clic
+                tags_fila.append("en_curso") 
 
             self.tree_cartelera.insert("", "end", iid=str(idx), values=(
                 f"Ronda {c['ronda']}", tapiz_str, c['estilo'], c['peso_str'], c['nom_rojo'], c['nom_azul']
@@ -2145,14 +2122,20 @@ class PantallaPareo(ttk.Frame):
         p_rojo = self.obtener_peleador_real(match_node["peleador_rojo"])
         p_azul = self.obtener_peleador_real(match_node["peleador_azul"])
         
-        # Callback para soltar la BD si cierra la ventana con la X
         def liberar_combate():
             if hasattr(self.db, 'liberar_combate_en_curso'):
                 self.db.liberar_combate_en_curso(self.id_torneo, llave_key, match_node["match_id"])
+
+        # --- NUEVO: Callback de latido ---
+        def latido_combate():
+            if hasattr(self.db, 'mantener_latido_combate'):
+                self.db.mantener_latido_combate(self.id_torneo, llave_key, match_node["match_id"])
         
+        # Pasamos el callback extra como argumento
         VentanaCombate(self, match_node, p_rojo, p_azul, 
                        lambda m_id, gan, mot, arb, jue, jef, hist, tot: self.asignar_ganador(match_node, gan, mot, tab, llave_key, arb, jue, jef, hist, tot),
-                       callback_cancelar=liberar_combate)
+                       callback_cancelar=liberar_combate,
+                       callback_latido=latido_combate) # <-- Inyectado aquí
 
     def editar_pelea(self, match_node, tab, llave_key): 
         from ui.ventanas.ventana_editar_pelea import VentanaEditarPelea
@@ -2566,7 +2549,6 @@ class PantallaPareo(ttk.Frame):
         tab_objetivo = None
         estilo, peso = llave_key.split("-")
         
-        # Encontrar el tab exacto del estilo
         for tab in self.notebook.winfo_children():
             if getattr(tab, "estilo", "") == estilo:
                 tab_objetivo = tab
@@ -2576,8 +2558,8 @@ class PantallaPareo(ttk.Frame):
         p_azul = self.obtener_peleador_real(match_node.get('peleador_azul'))
         
         from ui.ventanas.ventana_editar_pelea import VentanaEditarPelea
-        # CORREGIDO: Usamos self.asignar_ganador que es la función que existe en tu código
-        VentanaEditarPelea(self.winfo_toplevel(), match_node, p_rojo, p_azul, tab_objetivo, llave_key, self.asignar_ganador)
+        # CORRECCIÓN: Usamos 'self' como parent en lugar de self.winfo_toplevel()
+        VentanaEditarPelea(self, match_node, p_rojo, p_azul, tab_objetivo, llave_key, self.asignar_ganador)
         
         if hasattr(self, "panel_flotante") and getattr(self, "panel_flotante"):
             getattr(self, "panel_flotante").destroy()
