@@ -349,6 +349,7 @@ class ConexionDB:
         if not conexion: return False
         try:
             with conexion.cursor() as cur:
+                # 1. Obtener la división
                 cur.execute("""
                     SELECT td.id FROM torneo_division td
                     JOIN peso_oficial_uww p ON td.id_peso_oficial_uww = p.id
@@ -359,8 +360,9 @@ class ConexionDB:
                 if not res: return False
                 id_td = res[0]
 
+                # 2. Función interna segura para obtener IDs de inscripción
                 def get_id_inscripcion(id_pel):
-                    if not id_pel: return None
+                    if not id_pel or id_pel == -1: return None # Ignora fantasmas
                     cur.execute("SELECT id FROM inscripcion WHERE id_torneo_division = %s AND id_peleador = %s", (id_td, id_pel))
                     r = cur.fetchone()
                     return r[0] if r else None
@@ -369,18 +371,19 @@ class ConexionDB:
                 id_ins_azul = get_id_inscripcion(id_peleador_azul)
                 id_ins_ganador = get_id_inscripcion(id_peleador_ganador)
 
-                if not id_ins_rojo or not id_ins_azul: return False
-
+                # 3. Obtener el ID del tipo de victoria
                 cur.execute("SELECT id FROM tipo_victoria WHERE codigo_uww = %s", (codigo_uww,))
                 tv_res = cur.fetchone()
                 id_tv = tv_res[0] if tv_res else None
 
+                # 4. Comprobar si el combate ya existe
                 cur.execute("SELECT id FROM combate WHERE id_torneo_division = %s AND identificador_llave = %s", (id_td, match_id))
                 comb_existente = cur.fetchone()
 
                 id_combate = None
 
                 if comb_existente:
+                    # Si ya existe, actualizamos
                     id_combate = comb_existente[0]
                     cur.execute("""
                         UPDATE combate 
@@ -390,6 +393,11 @@ class ConexionDB:
                         WHERE id = %s
                     """, (id_ins_ganador, id_tv, id_arbitro, id_juez, id_jefe_tapiz, puntos_rojo, puntos_azul, id_combate))
                 else:
+                    # Si NO existe, insertamos. Extraemos id_fase de forma segura para evitar crasheos.
+                    cur.execute("SELECT id FROM fase_combate ORDER BY id ASC LIMIT 1")
+                    fase_res = cur.fetchone()
+                    id_fase_val = fase_res[0] if fase_res else None
+
                     cur.execute("""
                         INSERT INTO combate (
                             id_torneo_division, id_fase, id_inscripcion_rojo, id_inscripcion_azul, 
@@ -398,15 +406,15 @@ class ConexionDB:
                             orden_pelea, estado, identificador_llave, hora_fin
                         )
                         VALUES (
-                            %s, (SELECT id FROM fase_combate LIMIT 1), %s, %s, 
+                            %s, %s, %s, %s, 
                             %s, %s, %s, %s, 
                             %s, %s, %s, 
                             1, 'Finalizado', %s, CURRENT_TIMESTAMP
                         ) RETURNING id
-                    """, (id_td, id_ins_rojo, id_ins_azul, id_ins_ganador, id_tv, id_arbitro, id_juez, id_jefe_tapiz, puntos_rojo, puntos_azul, match_id))
+                    """, (id_td, id_fase_val, id_ins_rojo, id_ins_azul, id_ins_ganador, id_tv, id_arbitro, id_juez, id_jefe_tapiz, puntos_rojo, puntos_azul, match_id))
                     id_combate = cur.fetchone()[0]
 
-                # Insertar historial de puntos (Solo si venimos del marcador en vivo)
+                # 5. Insertar historial de puntos
                 if historial is not None:
                     cur.execute("DELETE FROM puntuacion_combate WHERE id_combate = %s", (id_combate,))
                     for acc in historial:
@@ -420,7 +428,8 @@ class ConexionDB:
                 conexion.commit()
                 return True
         except Exception as e:
-            print(f"Error guardando resultado de combate: {e}")
+            # Ahora imprimimos el error exacto en consola para saber qué falló si vuelve a ocurrir
+            print(f"Error CRÍTICO guardando resultado de combate: {e}")
             conexion.rollback()
             return False
         finally:
