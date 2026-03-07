@@ -50,26 +50,79 @@ class VentanaPrevisualizacionPDF(tk.Toplevel):
 
     # ================= GESTIÓN DE CONFIGURACIÓN DE IMPRESIÓN =================
     def cargar_config_impresion(self):
-        default = {"impresora": "", "papel": "A4", "color": "Color", "copias": 1}
-        if os.path.exists("config_impresion.json"):
-            try:
-                with open("config_impresion.json", "r", encoding="utf-8") as f:
-                    default.update(json.load(f))
-            except: pass
-        return default
+        """Pide la configuración de impresión al padre (que conoce la ruta en assets)."""
+        # Delegamos completamente la carga al LogicaExportacionMixin
+        if hasattr(self.parent, 'cargar_config_impresion'):
+            return self.parent.cargar_config_impresion()
+        return {"impresora": "", "papel": "A4", "color": "Color", "copias": 1}
 
     def guardar_config_impresion(self, *args):
+        """Empaqueta las variables actuales y le pide al padre que las guarde en assets."""
         if not hasattr(self, 'var_impresora'): return
+        
         cfg = {
             "impresora": self.var_impresora.get(),
             "papel": self.var_papel.get(),
             "color": self.var_color_print.get(),
             "copias": int(self.var_copias.get() or 1)
         }
-        try:
-            with open("config_impresion.json", "w", encoding="utf-8") as f:
-                json.dump(cfg, f, indent=4)
-        except: pass
+        
+        # Delegamos el guardado al LogicaExportacionMixin
+        if hasattr(self.parent, 'guardar_config_impresion'):
+            self.parent.guardar_config_impresion(cfg)
+
+    def guardar_cambios(self):
+        """Recopila los datos visuales, actualiza el diccionario cfg y lo envía a la clase padre para guardar."""
+        for key, widgets in self.item_widgets.items():
+            if key not in self.cfg:
+                continue
+                
+            try:
+                # 1. Recuperar Coordenadas (Obligatorias)
+                nuevas_coords = [
+                    float(widgets['coords'][0].get()),
+                    float(widgets['coords'][1].get()),
+                    float(widgets['coords'][2].get()),
+                    float(widgets['coords'][3].get())
+                ]
+                self.cfg[key]['coords'] = nuevas_coords
+                
+                # 2. Recuperar Propiedades Tipográficas
+                if 'size' in widgets:
+                    self.cfg[key]['size'] = int(widgets['size'].get())
+                if 'align' in widgets:
+                    self.cfg[key]['align'] = widgets['align'].get()
+                if 'color' in widgets:
+                    self.cfg[key]['color'] = widgets['color'].get()
+                    
+                # 3. Recuperar Saltos Matriciales (step_x, step_y)
+                if 'step_x' in widgets:
+                    self.cfg[key]['step_x'] = float(widgets['step_x'].get())
+                if 'step_y' in widgets:
+                    self.cfg[key]['step_y'] = float(widgets['step_y'].get())
+                    
+                # 4. Checkboxes de estilo
+                if 'bold_var' in widgets:
+                    self.cfg[key]['bold'] = widgets['bold_var'].get()
+                if 'italic_var' in widgets:
+                    self.cfg[key]['italic'] = widgets['italic_var'].get()
+                    
+            except ValueError:
+                messagebox.showerror("Error de Formato", f"Por favor, ingrese solo números válidos en '{key}'.")
+                return
+
+        # Delegamos el guardado real al LogicaExportacionMixin (que ya sabe la ruta en 'assets')
+        exito = self.parent.guardar_config_pdf(self.cfg)
+        
+        if exito:
+            self.cambios_sin_guardar = False
+            messagebox.showinfo("Guardado Exitoso", "Las coordenadas han sido guardadas en la configuración.")
+            
+            # Si tienes un método que refresca el canvas, llámalo aquí. Ej: self.render_preview()
+            if hasattr(self, 'render_preview'):
+                self.render_preview()
+        else:
+            messagebox.showerror("Error", "Hubo un problema al intentar guardar el archivo JSON.")
 
     def obtener_impresoras_sistema(self):
         """Consulta a Windows la lista de impresoras instaladas vía PowerShell."""
@@ -398,6 +451,13 @@ class VentanaPrevisualizacionPDF(tk.Toplevel):
 
     def accion_imprimir_silenciosa(self):
         """Genera el PDF oculto y lo manda directamente a la cola de impresión seleccionada."""
+        
+        # --- NUEVO: AUTO-GUARDAR ANTES DE IMPRIMIR ---
+        if getattr(self, "cambios_sin_guardar", False):
+            if messagebox.askyesno("Guardar Cambios", "Tiene modificaciones sin guardar en el diseño.\n\n¿Desea guardarlas antes de imprimir?"):
+                self.guardar_cambios()
+        # ---------------------------------------------
+
         impresora = self.var_impresora.get()
         if not impresora or impresora == "Predeterminada del Sistema":
             messagebox.showwarning("Impresora", "Por favor seleccione una impresora válida.")

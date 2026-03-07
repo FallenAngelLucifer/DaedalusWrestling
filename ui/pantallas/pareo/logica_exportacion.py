@@ -4,6 +4,17 @@ import os
 import json
 from PIL import Image, EpsImagePlugin, ImageDraw, ImageFont
 
+# ================= RUTAS DINÁMICAS DE ASSETS =================
+# Sube 4 niveles: logica_exportacion.py -> pareo -> pantallas -> ui -> DaedalusWrestling
+DIRECTORIO_ACTUAL = os.path.dirname(os.path.abspath(__file__))
+DIRECTORIO_RAIZ = os.path.dirname(os.path.dirname(os.path.dirname(DIRECTORIO_ACTUAL)))
+DIRECTORIO_ASSETS = os.path.join(DIRECTORIO_RAIZ, "assets")
+
+RUTA_CONFIG_PDF = os.path.join(DIRECTORIO_ASSETS, "config", "config_pdf.json")
+RUTA_CONFIG_IMPRESION = os.path.join(DIRECTORIO_ASSETS, "config", "config_impresion.json")
+RUTA_PLANTILLA_PDF = os.path.join(DIRECTORIO_ASSETS, "plantillas", "hoja_anotacion.pdf")
+# ==============================================================
+
 # RUTA DINÁMICA: Detectar Ghostscript
 gs_path = r"C:\Program Files\gs\gs10.06.0\bin\gswin64c.exe"
 if os.path.exists(gs_path):
@@ -287,7 +298,7 @@ class LogicaExportacionMixin:
         messagebox.showinfo("Proceso Terminado", f"Imágenes guardadas en:\n{ruta_final}")
 
     def cargar_config_pdf(self):
-        ruta_config = "config_pdf.json"
+        ruta_config = RUTA_CONFIG_PDF
         
         # Estructura maestra que incluye estilos y los "saltos" matemáticos para matrices
         def estilo(coords, size=9, align="Izquierda", bold=False, color="#000000", step_x=0, step_y=0):
@@ -303,8 +314,6 @@ class LogicaExportacionMixin:
             "ronda": estilo([350, 193, 400, 213], 9, "Centro"), "fase": estilo([405, 193, 465, 213], 9, "Centro"), "tapiz": estilo([470, 193, 530, 213], 9, "Centro"),
             "rojo_nom": estilo([75, 244, 180, 264], 8), "rojo_club": estilo([183, 244, 275, 264], 7), "rojo_id": estilo([280, 244, 305, 264], 8, "Centro"),
             "azul_nom": estilo([322, 244, 425, 264], 8), "azul_club": estilo([429, 244, 515, 264], 7), "azul_id": estilo([520, 244, 545, 264], 8, "Centro"),
-            
-            # --- NUEVOS CAMPOS: PUNTOS, TOTALES Y CHEQUES ---
             "pts_r_p1": estilo([110, 278, 125, 298], 10, "Centro", False, "#cc0000", 15, 0),
             "pts_r_p2": estilo([110, 306, 125, 326], 10, "Centro", False, "#cc0000", 15, 0),
             "pts_a_p1": estilo([358, 278, 373, 298], 10, "Centro", False, "#0000cc", 15, 0),
@@ -345,8 +354,15 @@ class LogicaExportacionMixin:
         return defaults
 
     def guardar_config_pdf(self, config):
-        with open("config_pdf.json", "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
+        try:
+            # Crea la carpeta config si no existe
+            os.makedirs(os.path.dirname(RUTA_CONFIG_PDF), exist_ok=True)
+            with open(RUTA_CONFIG_PDF, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+            return True
+        except Exception as e:
+            print(f"Error guardando config PDF: {e}")
+            return False
 
     def imprimir_combate(self, match_node, estilo, peso):
         """Genera el PDF y lo abre para que el usuario pueda imprimirlo nativamente (Evita Error 1155)."""
@@ -371,7 +387,7 @@ class LogicaExportacionMixin:
             if not preview_mode and not ruta_directa: messagebox.showerror("Error", "PyMuPDF no está instalada.")
             return None
             
-        ruta_plantilla = "hoja_anotacion.pdf" 
+        ruta_plantilla = RUTA_PLANTILLA_PDF
         if not os.path.exists(ruta_plantilla): 
             if not preview_mode and not ruta_directa: messagebox.showerror("Error", f"No se encontró '{ruta_plantilla}'.")
             return None
@@ -1043,3 +1059,36 @@ class LogicaExportacionMixin:
             messagebox.showerror("Error", f"No se pudo generar el reporte:\n{e}")
         finally:
             conexion.close()
+
+    def cargar_config_impresion(self):
+        """Carga los parámetros de la impresora desde la carpeta assets."""
+        # Valores por defecto en caso de que el archivo se borre accidentalmente
+        defaults = {
+            "impresora": "Microsoft Print to PDF",
+            "papel": "A4",
+            "color": "Color",
+            "copias": 1
+        }
+        
+        if os.path.exists(RUTA_CONFIG_IMPRESION):
+            try:
+                with open(RUTA_CONFIG_IMPRESION, "r", encoding="utf-8") as f:
+                    cargado = json.load(f)
+                    # Actualiza los defaults con lo que haya en el JSON
+                    defaults.update(cargado)
+            except Exception as e:
+                print(f"Error cargando config de impresión: {e}")
+                
+        return defaults
+
+    def guardar_config_impresion(self, config):
+        """Guarda la configuración de impresión en su respectivo JSON dinámico."""
+        try:
+            # Crea la carpeta config si no existe (al igual que con el PDF)
+            os.makedirs(os.path.dirname(RUTA_CONFIG_IMPRESION), exist_ok=True)
+            with open(RUTA_CONFIG_IMPRESION, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+            return True
+        except Exception as e:
+            print(f"Error guardando config de impresión: {e}")
+            return False
