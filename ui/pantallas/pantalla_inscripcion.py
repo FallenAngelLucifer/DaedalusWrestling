@@ -317,9 +317,12 @@ class PantallaInscripcion(ttk.Frame):
         self.tabla.tag_configure("red_nuevo", background="#d4edda", foreground="#155724") 
         self.tabla.tag_configure("confirmado", background="white", foreground="black") 
         
-        # --- NUEVAS ETIQUETAS VISUALES ---
         self.tabla.tag_configure("eliminado_local", background="#f8d7da", foreground="#721c24") # Fondo rojo suave
         self.tabla.tag_configure("editado_local", background="#fff3cd", foreground="#856404")   # Fondo naranja suave
+        
+        # --- NUEVAS ETIQUETAS DE RED ---
+        self.tabla.tag_configure("editado_red", background="#cce5ff", foreground="#004085")   # Azul claro
+        self.tabla.tag_configure("eliminado_red", background="#e2e3e5", foreground="#383d41") # Gris
 
         btn_box = ttk.Frame(tabla_frame)
         btn_box.pack(fill="x", pady=5)
@@ -344,6 +347,9 @@ class PantallaInscripcion(ttk.Frame):
         self.tabla.bind("<<TreeviewSelect>>", self.al_seleccionar_tabla)
         self.tabla.bind("<Double-1>", self.on_double_click_tabla)
 
+        # --- NUEVO: Interceptar el clic físico en la tabla durante la edición ---
+        self.tabla.bind("<Button-1>", self._bloquear_clic_tabla_si_edita, add="+")
+
         self.cambiar_estado_inscripcion("disabled")
         self.actualizar_botones_guardado()
 
@@ -353,6 +359,11 @@ class PantallaInscripcion(ttk.Frame):
         """Impide absolutamente que el combobox despliegue su lista si se está editando un atleta."""
         if getattr(self, "id_atleta_editando", None) is not None:
             return "break" # Detiene el evento de clic en seco
+
+    def _bloquear_clic_tabla_si_edita(self, event):
+        """Impide interactuar con otras filas o deseleccionar la tabla mientras se edita."""
+        if getattr(self, "id_atleta_editando", None) is not None:
+            return "break" # Detiene el clic del ratón por completo
 
     def deshacer_cambios_locales(self):
         if not messagebox.askyesno("Deshacer Cambios", "¿Desea descartar todos los cambios locales (eliminaciones, ediciones y nuevos) y recargar la tabla original?"):
@@ -541,9 +552,16 @@ class PantallaInscripcion(ttk.Frame):
         self.tabla.focus_set()
 
     def actualizar_categoria_dinamica(self, *args):
-        # --- NUEVO: REGLA DE NO DESELECCIONAR TODOS ---
+        # --- CORTAFUEGOS 1: Si el combobox de atleta está vacío, abortar silenciosamente ---
+        # Esto evita el error emergente cuando acabas de añadir a alguien y el peso sigue ahí.
         if hasattr(self, 'cmb_atleta'):
             texto_atleta = self.cmb_atleta.get().strip()
+            if not texto_atleta:
+                if hasattr(self, 'lbl_cat_dinamica'):
+                    self.lbl_cat_dinamica.config(text="Categoría: --", foreground="gray")
+                return
+
+            # --- REGLA DE NO DESELECCIONAR TODOS ---
             atleta = next((a for a in getattr(self, "atletas_filtrados_objetos", []) if f"{a.get('apellidos', '')}, {a.get('nombre', '')} (ID: {a.get('id', '')})" == texto_atleta), None)
             
             if atleta:
@@ -562,7 +580,7 @@ class PantallaInscripcion(ttk.Frame):
             self.lbl_cat_dinamica.config(text="Categoría: Error", foreground="red")
             return
             
-        if peso_dado <= 20: # Validar pesos irreales (0 o negativos)
+        if peso_dado <= 20: 
             self.lbl_cat_dinamica.config(text="Peso irreal", foreground="red")
             return
 
@@ -570,16 +588,18 @@ class PantallaInscripcion(ttk.Frame):
             self.lbl_cat_dinamica.config(text="Confirme torneo primero", foreground="orange")
             return
 
-        # --- NORMALIZACIÓN DIRECTA ---
         estilos_sel = []
-        if self.var_estilo_libre.get(): estilos_sel.append(("Estilo Libre", 1)) # Antes decía solo "Libre"
+        if self.var_estilo_libre.get(): estilos_sel.append(("Estilo Libre", 1)) 
         if self.var_estilo_greco.get(): estilos_sel.append(("Grecorromana", 2))
         if self.var_estilo_femenina.get(): estilos_sel.append(("Femenina", 3))
 
-        if not estilos_sel: return messagebox.showwarning("Estilo Requerido", "Debe seleccionar al menos un estilo.")
+        # --- CORTAFUEGOS 2: Sustituimos el messagebox por un texto visual ---
+        if not estilos_sel:
+            if hasattr(self, 'lbl_cat_dinamica'):
+                self.lbl_cat_dinamica.config(text="Categoría: Faltan Estilos", foreground="orange")
+            return
 
         id_cat_torneo = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
-        pesos_oficiales_text, estilos_memoria, ids_divisiones = [], [], []
         
         cats_encontradas = []
         for nombre_estilo, id_estilo in estilos_sel:
@@ -589,10 +609,13 @@ class PantallaInscripcion(ttk.Frame):
                     if float(p['peso_minimo']) <= peso_dado <= float(p['peso_maximo']):
                         bracket_encontrado = p
                         break
+            
+            abr = "Lib" if nombre_estilo == "Estilo Libre" else nombre_estilo[:3]
+            
             if bracket_encontrado:
-                cats_encontradas.append(f"{nombre_estilo[:3]}: {bracket_encontrado['peso_maximo']}kg")
+                cats_encontradas.append(f"{abr}: {bracket_encontrado['peso_maximo']}kg")
             else:
-                cats_encontradas.append(f"{nombre_estilo[:3]}: Fuera de Rango")
+                cats_encontradas.append(f"{abr}: Fuera de Rango")
         
         texto_final = " | ".join(cats_encontradas)
         color = "red" if "Fuera" in texto_final else "#17a2b8"
@@ -756,7 +779,18 @@ class PantallaInscripcion(ttk.Frame):
         self.torneo_finalizado = False
         self.actualizar_botones_guardado()
 
-    def al_seleccionar_tabla(self, event):
+    def al_seleccionar_tabla(self, event=None):
+        # --- CORTAFUEGOS: Evitar deselección o cambio de fila con el teclado durante edición ---
+        if getattr(self, "id_atleta_editando", None) is not None:
+            # Forzar a mantener la selección en el atleta que se está editando
+            for item in self.tabla.get_children():
+                if self.tabla.item(item, "values") and int(self.tabla.item(item, "values")[0]) == self.id_atleta_editando:
+                    if item not in self.tabla.selection():
+                        self.tabla.selection_set(item)
+                    break
+            return
+
+        # Resto de la lógica normal
         if getattr(self, "todo_bloqueado", False) or getattr(self, "bloquear_seleccion_tabla", False):
             if self.tabla.selection(): self.tabla.selection_remove(self.tabla.selection()[0])
             return
@@ -770,9 +804,9 @@ class PantallaInscripcion(ttk.Frame):
         if not ins_data: return
         
         is_locked = any(div_id in getattr(self, "pesos_bloqueados_ids", set()) for div_id in ins_data['ids_divisiones'])
-        is_deleted = ins_data.get('estado_local') == 'eliminado'
         
-        # --- NUEVO: Bloquear botones si la llave cerró o si está marcado para eliminar ---
+        is_deleted = ins_data.get('estado_local') == 'eliminado' or (ins_data.get('tipo_cambio_red') == 'eliminado' and ins_data.get('ciclos_red', 2) < 2)
+        
         if is_locked or is_deleted:
             self.btn_editar_memoria.config(state="disabled")
             self.btn_eliminar_memoria.config(state="disabled")
@@ -1018,7 +1052,7 @@ class PantallaInscripcion(ttk.Frame):
         self.id_atleta_editando = int(valores[0])
 
         # --- CORRECCIÓN: Limpiar prefijos visuales (RED, NUEVO, etc.) del nombre ---
-        nombre_crudo = valores[2].replace("🌐 [RED] ", "").replace("✨ [NUEVO] ", "").replace("✏️ [EDITAR] ", "").replace("❌ [ELIMINAR] ", "")
+        nombre_crudo = valores[2].replace("🌐 [RED] ", "").replace("✨ [NUEVO] ", "").replace("✏️ [EDITAR] ", "").replace("❌ [ELIMINAR] ", "").replace("🔄 [EDITADO] ", "").replace("🗑️ [BORRADO] ", "")
 
         # Asignar el valor limpio para que el buscador interno lo encuentre a la perfección
         atleta_str = f"{nombre_crudo} (ID: {self.id_atleta_editando})"
@@ -1063,10 +1097,13 @@ class PantallaInscripcion(ttk.Frame):
         self.tabla.focus_set()
         
         try:
-            self.tabla.focus_set() 
             texto_atleta = self.cmb_atleta.get().strip()
             peso_str = self.ent_peso.get().strip()
             
+            # --- CORTAFUEGOS 1: Prevenir "clic fantasma" tras limpiar el formulario ---
+            if not texto_atleta and not peso_str: 
+                return
+                
             if not texto_atleta or not peso_str: 
                 messagebox.showwarning("Incompleto", "Seleccione atleta y peso.")
                 return
@@ -1077,7 +1114,6 @@ class PantallaInscripcion(ttk.Frame):
             atleta = next((a for a in getattr(self, "atletas_filtrados_objetos", []) if f"{a['apellidos']}, {a['nombre']} (ID: {a['id']})" == texto_atleta), None)
             if not atleta: return messagebox.showwarning("Error", "Atleta no válido.")
 
-            # --- CORRECCIÓN DE TIPOS: Asegurar que buscamos con IDs enteros ---
             id_cat_torneo = next((int(c['id']) for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
             
             estilos_sel = []
@@ -1092,7 +1128,6 @@ class PantallaInscripcion(ttk.Frame):
             for nombre_estilo, id_estilo in estilos_sel:
                 bracket_encontrado = None
                 for p in self.pesos_oficiales_db:
-                    # Comparación forzada a enteros para evitar el error de NULL
                     if int(p['id_categoria_edad']) == id_cat_torneo and int(p['id_estilo_lucha']) == int(id_estilo):
                         if float(p['peso_minimo']) <= peso_dado <= float(p['peso_maximo']):
                             bracket_encontrado = p
@@ -1104,31 +1139,52 @@ class PantallaInscripcion(ttk.Frame):
                 abr = "Lib" if nombre_estilo == "Estilo Libre" else nombre_estilo[:3]
                 pesos_oficiales_text.append(f"{abr}: {bracket_encontrado['peso_maximo']}kg")
                 estilos_memoria.append(nombre_estilo)
-                # GUARDAMOS EL ID EXPLÍCITO (Este es el id_peso_oficial_uww que faltaba)
                 ids_divisiones.append(int(bracket_encontrado['id']))
 
             texto_peso_oficial = " | ".join(pesos_oficiales_text)
+            peso_formateado = f"{peso_dado:.2f}"
 
+            # --- RUTA 1: ACTUALIZANDO UN ATLETA EXISTENTE ---
             if self.id_atleta_editando is not None:
                 for ins in self.inscripciones_memoria:
                     if ins['id_atleta'] == self.id_atleta_editando:
-                        ins.update({'peso': peso_str, 'peso_oficial': texto_peso_oficial, 'estilos': estilos_memoria, 'ids_divisiones': ids_divisiones})
-                        # --- NUEVO: MARCAR COMO EDITADO SI VIENE DE LA RED ---
+                        ins.update({'peso': peso_formateado, 'peso_oficial': texto_peso_oficial, 'estilos': estilos_memoria, 'ids_divisiones': ids_divisiones})
                         if ins.get('de_red'):
                             ins['estado_local'] = 'editado'
                         break
                 self.actualizar_tabla_visual()
+                
+                # Reseleccionar en la tabla tras actualizar
+                for item in self.tabla.get_children():
+                    if int(self.tabla.item(item, "values")[0]) == self.id_atleta_editando:
+                        self.tabla.selection_set(item)
+                        self.al_seleccionar_tabla(None)
+                        break
+                        
                 self.cancelar_edicion()
                 return messagebox.showinfo("Actualizado", "Inscripción actualizada localmente.\nRecuerde presionar 'Sincronizar' para guardar.")
 
             if any(ins['id_atleta'] == atleta['id'] for ins in self.inscripciones_memoria):
                 return messagebox.showwarning("Duplicado", "Este atleta ya está en la lista.")
 
+            # --- RUTA 2: AGREGANDO UN ATLETA NUEVO ---
             self.inscripciones_memoria.append({
-                "id_atleta": int(atleta['id']), "peso": peso_str, "peso_oficial": " | ".join(pesos_oficiales_text), 
+                "id_atleta": int(atleta['id']), "peso": peso_formateado, "peso_oficial": texto_peso_oficial, 
                 "estilos": estilos_memoria, "ids_divisiones": ids_divisiones, "de_red": False
             })
             self.actualizar_tabla_visual()
+            
+            # --- CORTAFUEGOS 2: Seleccionar automáticamente al atleta recién añadido ---
+            for item in self.tabla.get_children():
+                if int(self.tabla.item(item, "values")[0]) == int(atleta['id']):
+                    self.tabla.selection_set(item)
+                    self.al_seleccionar_tabla(None)
+                    break
+
+            # Limpiar y bloquear campos tras agregar a memoria de forma segura
+            self.cmb_atleta.set('')
+            self.al_seleccionar_atleta() 
+
         finally:
             self.esta_editando_localmente = False
             self.after(500, lambda: setattr(self, "_procesando_agregado", False))
@@ -1139,7 +1195,7 @@ class PantallaInscripcion(ttk.Frame):
         if not item_sel: return
         
         valores = self.tabla.item(item_sel[0], "values")
-        nombre_atleta = valores[2].replace("🌐 [RED] ", "").replace("✨ [NUEVO] ", "").replace("✏️ [EDITAR] ", "")
+        nombre_atleta = valores[2].replace("🌐 [RED] ", "").replace("✨ [NUEVO] ", "").replace("✏️ [EDITAR] ", "").replace("🔄 [EDITADO] ", "").replace("🗑️ [BORRADO] ", "")
         id_atleta = int(valores[0])
         
         if not messagebox.askyesno("Marcar Eliminación", f"¿Marcar a '{nombre_atleta}' para ser eliminado?\n\nEl cambio se aplicará a la sala cuando presione 'Sincronizar'."): 
@@ -1230,9 +1286,19 @@ class PantallaInscripcion(ttk.Frame):
                 if not is_dsq: tags_list.append("confirmado")
             elif ins.get("de_red", False):
                 ciclos = ins.get("ciclos_red", 2)
-                if ciclos < 2:
-                    prefijo = "✨ [NUEVO] "
-                    tags_list.append("red_nuevo")
+                tipo_cambio = ins.get("tipo_cambio_red", "nuevo")
+                
+                # --- FIX: Prioridad absoluta al estado de borrado ---
+                if tipo_cambio == 'eliminado':
+                    prefijo = "🗑️ [BORRADO] "
+                    tags_list.append("eliminado_red")
+                elif ciclos < 2:
+                    if tipo_cambio == 'editado':
+                        prefijo = "🔄 [EDITADO] "
+                        tags_list.append("editado_red")
+                    else:
+                        prefijo = "✨ [NUEVO] "
+                        tags_list.append("red_nuevo")
                 else:
                     prefijo = "🌐 [RED] "
                     tags_list.append("sync_red")
@@ -1994,36 +2060,26 @@ class PantallaInscripcion(ttk.Frame):
         self.actualizar_tabla_visual()
 
     def guardar_solo_torneo(self):
-        """Sincroniza validando estrictamente que quede al menos una pareja en el torneo."""
+        """Sincroniza forzando el reemplazo de los atletas editados para que la BD no los ignore."""
         id_existente = getattr(self, 'torneo_debug_id', None)
         es_master = getattr(self.controller, 'es_master', False)
         soy_guest = bool(id_existente) and not es_master
 
         # --- ESCUDO ANTI-NULL Y ANTI-DUPLICADOS UNIVERSAL ---
         datos_limpios = []
-        divisiones = {} # Diccionario para agrupar y validar parejas
+        datos_pre_sync = [] # Lista temporal sin los atletas editados
+        hay_editados = False
+        divisiones = {} 
         
         for ins in self.inscripciones_memoria:
-            # 1. Saltamos los que marcamos con el botón "Eliminar"
-            if ins.get('estado_local') == 'eliminado':
+            # 1. Saltamos los que marcamos con el botón "Eliminar" O los que la red ya eliminó
+            if ins.get('estado_local') == 'eliminado' or ins.get('tipo_cambio_red') == 'eliminado':
                 continue
                 
-            # --- CORRECCIÓN DE PESO 0: Traducimos "peso" a las claves que la BD exige ---
             ins_copia = ins.copy()
             ins_copia['peso_pesaje'] = ins.get('peso') 
             ins_copia['peso_dado'] = ins.get('peso')   
-                
-            # 2. Si es de la red y NO lo hemos editado localmente, pasa intacto
-            if ins.get('de_red') and ins.get('estado_local') != 'editado':
-                datos_limpios.append(ins_copia)
-                
-                # Aprovechamos de contarlo para la validación de parejas
-                for id_div in ins.get('ids_divisiones', []):
-                    if id_div not in divisiones: divisiones[id_div] = []
-                    divisiones[id_div].append(ins['id_atleta'])
-                continue
-                
-            # 3. Si es Blanco (Nuevo) o Naranja (Editado), lo validamos a fondo
+            
             divs_validas = []
             estilos_validos = []
             
@@ -2040,7 +2096,16 @@ class PantallaInscripcion(ttk.Frame):
             if divs_validas:
                 ins_copia['ids_divisiones'] = divs_validas
                 ins_copia['estilos'] = estilos_validos
-                datos_limpios.append(ins_copia)
+                
+                # --- TRUCO DE MAGIA: Separamos a los editados ---
+                if ins.get('estado_local') == 'editado':
+                    ins_copia['de_red'] = False 
+                    hay_editados = True
+                    datos_limpios.append(ins_copia)
+                    # NO lo agregamos a datos_pre_sync (Forzamos a la BD a creer que lo borramos)
+                else:
+                    datos_limpios.append(ins_copia)
+                    datos_pre_sync.append(ins_copia)
 
         # --- VALIDACIÓN GLOBAL: AL MENOS 1 PAREJA ---
         hay_pareja = any(len(atletas) >= 2 for atletas in divisiones.values())
@@ -2052,10 +2117,15 @@ class PantallaInscripcion(ttk.Frame):
             if not messagebox.askyesno("Sincronizar", "¿Deseas enviar tus cambios a la base de datos?"):
                 return
             self.esta_editando_localmente = True
+            
+            # 1. Engañar a la BD para que purgue la versión vieja del atleta
+            if hay_editados:
+                self.db.sincronizar_inscripciones(id_existente, datos_pre_sync)
+                
+            # 2. Insertar la versión nueva y editada del atleta
             exito = self.db.sincronizar_inscripciones(id_existente, datos_limpios)
             
             if exito:
-                # --- APLICAR CAMBIOS FÍSICAMENTE TRAS EL ÉXITO ---
                 self.inscripciones_memoria = [i for i in self.inscripciones_memoria if i.get('estado_local') != 'eliminado']
                 for ins in self.inscripciones_memoria:
                     ins['de_red'] = True
@@ -2072,40 +2142,19 @@ class PantallaInscripcion(ttk.Frame):
         # --- LÓGICA PARA EL MÁSTER ---
         if id_existente:
             self.esta_editando_localmente = True 
-            if self.db.sincronizar_inscripciones(id_existente, datos_limpios):
-                for ins in self.inscripciones_memoria:
-                    ins['de_red'] = True
-                    ins['ciclos_red'] = 2 
-                self._ultima_firma_red = None 
-                self.actualizar_tabla_visual() 
-                messagebox.showinfo("Éxito", "Cambios sincronizados correctamente.")
-                if hasattr(self, 'btn_avanzar_pareo'): self.btn_avanzar_pareo.config(state="normal")
-            self.esta_editando_localmente = False
-            return
-
-        # --- LÓGICA PARA EL CREADOR O MÁSTER ---
-        if not self.inscripciones_memoria:
-            return messagebox.showwarning("Sin Atletas", "Debe inscribir atletas antes de guardar.")
-
-        divisiones = {}
-        for ins in datos_limpios:
-            for i, id_div in enumerate(ins['ids_divisiones']):
-                if id_div in getattr(self, "pesos_bloqueados_ids", set()):
-                    continue
-                estilo = ins['estilos'][i] if i < len(ins['estilos']) else "Estilo"
-                nombre_atl = next((f"{a['apellidos']}, {a['nombre']}" for a in self.atletas_db if a['id'] == ins['id_atleta']), "Atleta")
             
-                if id_div not in divisiones:
-                    divisiones[id_div] = {"estilo": estilo, "atletas": []}
-                divisiones[id_div]["atletas"].append(nombre_atl)
-
-        if id_existente:
-            self.esta_editando_localmente = True 
+            # 1. Engañar a la BD para que purgue la versión vieja
+            if hay_editados:
+                self.db.sincronizar_inscripciones(id_existente, datos_pre_sync)
+                
+            # 2. Insertar la versión nueva
             if self.db.sincronizar_inscripciones(id_existente, datos_limpios):
                 
-                # --- CONFIRMACIÓN VISUAL PARA EL MÁSTER ---
+                # --- FIX CRÍTICO: Limpiar estados locales para el Máster también ---
+                self.inscripciones_memoria = [i for i in self.inscripciones_memoria if i.get('estado_local') != 'eliminado']
                 for ins in self.inscripciones_memoria:
                     ins['de_red'] = True
+                    if 'estado_local' in ins: del ins['estado_local']
                     
                 self._ultima_firma_red = None 
                 self.actualizar_tabla_visual() 
@@ -2114,8 +2163,25 @@ class PantallaInscripcion(ttk.Frame):
             self.esta_editando_localmente = False
             return
 
-        hay_pareja = any(len(d["atletas"]) >= 2 for d in divisiones.values())
-        if not hay_pareja:
+        # --- LÓGICA DE CREACIÓN DEL TORNEO (NUNCA ANTES GUARDADO) ---
+        if not self.inscripciones_memoria:
+            return messagebox.showwarning("Sin Atletas", "Debe inscribir atletas antes de guardar.")
+
+        # Re-construir divisiones para validación de sala
+        divisiones_nuevas = {}
+        for ins in datos_limpios:
+            for i, id_div in enumerate(ins['ids_divisiones']):
+                if id_div in getattr(self, "pesos_bloqueados_ids", set()):
+                    continue
+                estilo = ins['estilos'][i] if i < len(ins['estilos']) else "Estilo"
+                nombre_atl = next((f"{a['apellidos']}, {a['nombre']}" for a in self.atletas_db if a['id'] == ins['id_atleta']), "Atleta")
+            
+                if id_div not in divisiones_nuevas:
+                    divisiones_nuevas[id_div] = {"estilo": estilo, "atletas": []}
+                divisiones_nuevas[id_div]["atletas"].append(nombre_atl)
+
+        hay_pareja_nueva = any(len(d["atletas"]) >= 2 for d in divisiones_nuevas.values())
+        if not hay_pareja_nueva:
             return messagebox.showerror("Error", "Debe haber al menos 2 atletas en una misma categoría para crear la sala.")
 
         id_cat = next((c['id'] for c in self.categorias_db if c['nombre'] == self.categoria_confirmada), None)
@@ -2492,12 +2558,8 @@ class PantallaInscripcion(ttk.Frame):
 
                         texto_oficial = " | ".join(data["pesos_text"])
                         
-                        # --- FIX: Comparación Matemática (Float vs Float) ---
-                        # Evita que '55.0' y '55.00' sean tratados como diferentes, pero detecta '55.1'
-                        try:
-                            cambio_peso = float(existente.get('peso', '0')) != float(peso_red)
-                        except:
-                            cambio_peso = str(existente.get('peso', '0')) != str(peso_red)
+                        try: cambio_peso = float(existente.get('peso', '0')) != float(peso_red)
+                        except: cambio_peso = str(existente.get('peso', '0')) != str(peso_red)
                             
                         cambio_oficial = str(existente.get('peso_oficial')) != str(texto_oficial)
                         cambio_estilos = set(existente.get('estilos', [])) != set(data["estilos"])
@@ -2507,6 +2569,9 @@ class PantallaInscripcion(ttk.Frame):
                             existente['peso_oficial'] = texto_oficial
                             existente['estilos'] = data["estilos"]
                             existente['ids_divisiones'] = data["ids_divs"]
+                            # --- NUEVO: Resetear ciclo y marcar como editado por la red ---
+                            existente['ciclos_red'] = 0
+                            existente['tipo_cambio_red'] = 'editado'
                             hubo_cambios = True
                             
                         if existente.get('de_red') and existente.get('ciclos_red', 2) < 2:
@@ -2518,16 +2583,37 @@ class PantallaInscripcion(ttk.Frame):
                         nueva_memoria.append({
                             "id_atleta": id_atl, "peso": str(peso_red), "peso_oficial": " | ".join(data["pesos_text"]),
                             "estilos": data["estilos"], "ids_divisiones": data["ids_divs"],
-                            "de_red": True, "ciclos_red": 0 
+                            "de_red": True, "ciclos_red": 0, "tipo_cambio_red": "nuevo" # <--- Etiqueta inicial
                         })
                         hubo_cambios = True
                         
+                # --- NUEVO: DETECTAR Y MANTENER ELIMINADOS DE LA RED POR 2 CICLOS ---
                 for loc in self.inscripciones_memoria:
-                    if int(loc['id_atleta']) not in atletas_agrupados and not loc.get('de_red'):
-                        nueva_memoria.append(loc)
+                    id_loc = int(loc['id_atleta'])
+                    if id_loc not in atletas_agrupados:
+                        if not loc.get('de_red'):
+                            # Local puro, se conserva en pantalla
+                            nueva_memoria.append(loc)
+                        else:
+                            # Era de red, pero ya no está en BD (fue eliminado por alguien más)
+                            ciclos = loc.get('ciclos_red', 2)
+                            tipo = loc.get('tipo_cambio_red', '')
+                            
+                            if tipo != 'eliminado':
+                                # Recién descubierto que lo borraron, iniciamos su velorio visual
+                                loc['tipo_cambio_red'] = 'eliminado'
+                                loc['ciclos_red'] = 0
+                                nueva_memoria.append(loc)
+                                hubo_cambios = True
+                            elif ciclos < 1: # --- FIX: Reducimos de 2 a 1 para que desaparezca a los 3-6 segundos ---
+                                loc['ciclos_red'] += 1
+                                nueva_memoria.append(loc)
+                                hubo_cambios = True
+                            else:
+                                hubo_cambios = True
                         
                 ids_en_red = set(atletas_agrupados.keys())
-                ids_azules_locales = set(int(i['id_atleta']) for i in self.inscripciones_memoria if i.get('de_red'))
+                ids_azules_locales = set(int(i['id_atleta']) for i in self.inscripciones_memoria if i.get('de_red') and i.get('tipo_cambio_red') != 'eliminado')
                 if ids_en_red != ids_azules_locales:
                     hubo_cambios = True
 

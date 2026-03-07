@@ -666,15 +666,24 @@ class PantallaPareo(ttk.Frame):
         # 3. Descargar resultados de combates ya finalizados
         nuevos_resultados = self.db.cargar_resultados_combates(self.id_torneo) if hasattr(self.db, 'cargar_resultados_combates') else getattr(self, 'resultados_combates', {})
 
-        # 4. Detectar si hubo cambios en progreso o en ganadores
+        # --- NUEVO: 3.5 Descargar cantidad de llaves confirmadas por el Máster ---
+        ids_bloqueados = self.db.obtener_divisiones_bloqueadas(self.id_torneo) if hasattr(self.db, 'obtener_divisiones_bloqueadas') else []
+        cantidad_bloqueadas_actual = len(ids_bloqueados)
+
+        # 4. Detectar si hubo cambios en progreso, ganadores O confirmaciones
         estado_anterior_curso = getattr(self, 'combates_en_curso_red', {})
         estado_anterior_resultados = getattr(self, 'resultados_combates', {})
-        hubo_cambios = (nuevos_combates != estado_anterior_curso) or (nuevos_resultados != estado_anterior_resultados)
+        cantidad_bloqueadas_anterior = getattr(self, 'cantidad_bloqueadas_red', len(self.divisiones_bloqueadas))
+        
+        hubo_cambios = (nuevos_combates != estado_anterior_curso) or \
+                       (nuevos_resultados != estado_anterior_resultados) or \
+                       (cantidad_bloqueadas_actual != cantidad_bloqueadas_anterior)
         
         self.combates_en_curso_red = nuevos_combates
+        self.cantidad_bloqueadas_red = cantidad_bloqueadas_actual
         
-        # Si hubo nuevos ganadores, reconstruimos la matriz lógica ANTES de dibujar
-        if nuevos_resultados != estado_anterior_resultados:
+        # Si hubo nuevos ganadores O NUEVAS LLAVES CONFIRMADAS, reconstruimos la matriz lógica
+        if (nuevos_resultados != estado_anterior_resultados) or (cantidad_bloqueadas_actual != cantidad_bloqueadas_anterior):
             self.resultados_combates = nuevos_resultados
             self.pre_cargar_memoria() 
 
@@ -1293,44 +1302,10 @@ class PantallaPareo(ttk.Frame):
             
         # LÓGICA DE BLOQUEOS
         total_bloqueadas = len(getattr(self, "divisiones_bloqueadas", []))
-        total_finalizados = sum(len(matches) for matches in getattr(self, "resultados_combates", {}).values())
-
         self.cartelera_bloqueada = total_bloqueadas == 0
 
-        # --- ESCUDO DEFINITIVO PARA TORNEOS CERRADOS ---
-        if getattr(self, "torneo_cerrado_en_db", False) or getattr(self.controller, "torneo_finalizado", False):
-            if hasattr(self, 'rb_pendientes'):
-                try: self.rb_pendientes.pack_forget() 
-                except: pass
-                
-            if hasattr(self, 'rb_historial'):
-                self.rb_historial.config(state="normal") 
-                
-            # Si intentó pasarse a Pendientes, lo forzamos de vuelta a Historial
-            if not self.modo_historial:
-                self.filtro_cartelera.set("Historial")
-                self.modo_historial = True
-        else:
-            # Comportamiento normal si el torneo sigue vivo
-            if hasattr(self, 'rb_pendientes'):
-                # Si estaba oculto, lo volvemos a mostrar ANTES del de historial
-                if not self.rb_pendientes.winfo_ismapped():
-                    try: self.rb_pendientes.pack(side="left", padx=5, before=self.rb_historial) 
-                    except: pass
-                self.rb_pendientes.config(state="normal")
-                
-            if total_finalizados == 0:
-                if hasattr(self, 'rb_historial'):
-                    self.rb_historial.config(state="disabled")
-                if self.modo_historial:
-                    self.filtro_cartelera.set("Pendientes")
-                    self.modo_historial = False 
-            else:
-                if hasattr(self, 'rb_historial'):
-                    self.rb_historial.config(state="normal")
-                    
+        # --- 1. RECOLECTAR TODAS LAS PELEAS PRIMERO ---
         todas_peleas = []
-        
         for llave_key in self.divisiones_bloqueadas:
             grid = self.grids_generados.get(llave_key, [])
             estilo, peso_str = llave_key.split("-")
@@ -1364,8 +1339,48 @@ class PantallaPareo(ttk.Frame):
                                 "terminada": is_terminada,
                                 "tapiz_activo": tapiz_activo 
                             })
-                            
-        # Evaluamos qué vista quiere el usuario
+
+        # --- 2. CONTAR PENDIENTES Y FINALIZADOS ---
+        combates_pendientes = [c for c in todas_peleas if not c['terminada']]
+        total_pendientes = len(combates_pendientes)
+        total_finalizados = len([c for c in todas_peleas if c['terminada']])
+
+        # --- 3. LÓGICA VISUAL DE LAS PESTAÑAS DE NAVEGACIÓN ---
+        torneo_cerrado = getattr(self, "torneo_cerrado_en_db", False) or getattr(self.controller, "torneo_finalizado", False)
+        
+        # Ocultar si está cerrado oficialmente O si ya hay peleas registradas pero 0 pendientes (Torneo finalizado en la práctica)
+        if torneo_cerrado or (len(todas_peleas) > 0 and total_pendientes == 0):
+            if hasattr(self, 'rb_pendientes'):
+                try: self.rb_pendientes.pack_forget() 
+                except: pass
+                
+            if hasattr(self, 'rb_historial'):
+                self.rb_historial.config(state="normal") 
+                
+            # Si intentó pasarse a Pendientes o ya no hay, lo forzamos de vuelta a Historial
+            if not self.modo_historial:
+                self.filtro_cartelera.set("Historial")
+                self.modo_historial = True
+        else:
+            # Comportamiento normal si el torneo sigue vivo y HAY pendientes
+            if hasattr(self, 'rb_pendientes'):
+                # Si estaba oculto, lo volvemos a mostrar ANTES del historial
+                if not self.rb_pendientes.winfo_ismapped():
+                    try: self.rb_pendientes.pack(side="left", padx=5, before=self.rb_historial) 
+                    except: pass
+                self.rb_pendientes.config(state="normal")
+                
+            if total_finalizados == 0:
+                if hasattr(self, 'rb_historial'):
+                    self.rb_historial.config(state="disabled")
+                if self.modo_historial:
+                    self.filtro_cartelera.set("Pendientes")
+                    self.modo_historial = False 
+            else:
+                if hasattr(self, 'rb_historial'):
+                    self.rb_historial.config(state="normal")
+
+        # Evaluamos qué vista quiere el usuario finalmente
         self.modo_historial = (self.filtro_cartelera.get() == "Historial")
         
         if self.modo_historial:
@@ -2612,9 +2627,20 @@ class PantallaPareo(ttk.Frame):
 
     # ================= CIERRE DE TORNEO Y REPORTES =================
     def cerrar_torneo(self):
-        # 1. Validar que no hayan combates pendientes en la cartelera
-        if len(self.tree_cartelera.get_children()) > 0:
-            messagebox.showwarning("Torneo Incompleto", "Aún hay combates pendientes en la cartelera.\n\nTermine todos los combates programados antes de cerrar el torneo.")
+        # 1. Validar lógicamente que no hayan combates pendientes en ninguna matriz
+        hay_pendientes = False
+        for llave_key, grid in self.grids_generados.items():
+            for r in grid:
+                for node in r:
+                    if isinstance(node, dict) and node.get("tipo") == "combate":
+                        if not node.get("ganador"):
+                            hay_pendientes = True
+                            break
+                if hay_pendientes: break
+            if hay_pendientes: break
+
+        if hay_pendientes:
+            messagebox.showwarning("Torneo Incompleto", "Aún hay combates pendientes en el torneo.\n\nTermine todos los combates programados antes de cerrar el torneo.")
             return
         
         # 2. Validar que todas las divisiones hayan sido bloqueadas
@@ -2748,6 +2774,73 @@ class PantallaPareo(ttk.Frame):
                                 if p_gan and p_rojo and p_azul:
                                     id_perd = p_azul['id'] if p_gan['id'] == p_rojo['id'] else p_rojo['id']
                                     posiciones[id_perd] = "3ro (Bronce)"
+
+            # --- NUEVO: TABLA DE MEDALLERÍA POR CLUBES ---
+            elementos.append(Spacer(1, 0.2 * inch))
+            estilo_medallero_tit = ParagraphStyle('MedalleroTit', parent=estilos['Heading2'], alignment=1, fontSize=14, textColor=colors.HexColor("#2c3e50"), fontName='Helvetica-Bold', spaceAfter=10)
+            elementos.append(Paragraph("MEDALLERO GENERAL POR CLUBES", estilo_medallero_tit))
+
+            # 1. Inicializar el medallero con todos los clubes inscritos (en 0)
+            medallero = {}
+            for ins in inscripciones:
+                club = ins['club'] if ins['club'] and ins['club'] != "N/A" else "Sin Club"
+                if club not in medallero:
+                    medallero[club] = {"Oro": 0, "Plata": 0, "Bronce": 0}
+
+            # 2. Contar las medallas según las posiciones calculadas
+            for ins in inscripciones:
+                club = ins['club'] if ins['club'] and ins['club'] != "N/A" else "Sin Club"
+                pos = posiciones.get(ins['id_peleador'], "")
+                
+                if "1ro" in pos: medallero[club]["Oro"] += 1
+                elif "2do" in pos: medallero[club]["Plata"] += 1
+                elif "3ro" in pos: medallero[club]["Bronce"] += 1
+
+            # 3. Ordenar: Primero por Oro, luego Plata, luego Bronce (Descendente)
+            clubes_ordenados = sorted(medallero.keys(), key=lambda c: (medallero[c]["Oro"], medallero[c]["Plata"], medallero[c]["Bronce"]), reverse=True)
+
+            # 4. Construir la tabla visual
+            datos_medallero = [["CLUB / EQUIPO", "ORO", "PLATA", "BRONCE", "TOTAL"]]
+            for club in clubes_ordenados:
+                oros = medallero[club]["Oro"]
+                platas = medallero[club]["Plata"]
+                bronces = medallero[club]["Bronce"]
+                total_medallas = oros + platas + bronces
+                datos_medallero.append([club, str(oros), str(platas), str(bronces), str(total_medallas)])
+
+            # Anchos calibrados para una página apaisada (Landscape)
+            tabla_medallero = Table(datos_medallero, colWidths=[4*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch])
+            
+            # Estilos con colores para las medallas
+            tabla_medallero.setStyle(TableStyle([
+                # Encabezado principal
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#34495e")), 
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'), 
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                
+                # Alineación de datos
+                ('ALIGN', (0, 1), (0, -1), 'LEFT'),   # Club a la izquierda
+                ('LEFTPADDING', (0, 1), (0, -1), 10),
+                ('ALIGN', (1, 1), (-1, -1), 'CENTER'), # Números centrados
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                
+                # Colores de fondo por columna (Oro, Plata, Bronce)
+                ('BACKGROUND', (1, 1), (1, -1), colors.HexColor("#fff8e1")), # Fondo sutil Oro
+                ('BACKGROUND', (2, 1), (2, -1), colors.HexColor("#f2f3f4")), # Fondo sutil Plata
+                ('BACKGROUND', (3, 1), (3, -1), colors.HexColor("#fbeee6")), # Fondo sutil Bronce
+                ('BACKGROUND', (4, 1), (4, -1), colors.HexColor("#e8f8f5")), # Fondo sutil Total
+                
+                # Cuadrícula general
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ]))
+            
+            elementos.append(tabla_medallero)
+            elementos.append(Spacer(1, 0.4 * inch))
 
             # 4. AGRUPACIÓN JERÁRQUICA: ESTILO -> PESO
             datos_organizados = {}
