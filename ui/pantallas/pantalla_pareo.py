@@ -446,7 +446,7 @@ class PantallaPareo(ttk.Frame):
         """Regresa a la pantalla de inscripción manteniendo la conexión de red activa."""
         self.cerrar_panel_combate()
             
-        from ui.pantallas.pantalla_inscripcion import PantallaInscripcion
+        from ui.pantallas.inscripcion.pantalla_inscripcion import PantallaInscripcion
         p_inscripcion = self.controller.pantallas.get(PantallaInscripcion)
         if p_inscripcion:
             p_inscripcion.refrescar_estado_bloqueos()

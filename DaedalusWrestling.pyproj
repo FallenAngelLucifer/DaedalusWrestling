@@ -23,8 +23,12 @@
   <ItemGroup>
     <Compile Include="database\conexion_db.py" />
     <Compile Include="main.py" />
-    <Compile Include="ui\pantallas\pantalla_inscripcion.py" />
+    <Compile Include="ui\pantallas\inscripcion\logica_memoria.py" />
+    <Compile Include="ui\pantallas\inscripcion\logica_red.py" />
+    <Compile Include="ui\pantallas\inscripcion\logica_torneo.py" />
+    <Compile Include="ui\pantallas\inscripcion\pantalla_inscripcion.py" />
     <Compile Include="ui\pantallas\pantalla_pareo.py" />
+    <Compile Include="ui\ventanas\ventana_cargar_torneo.py" />
     <Compile Include="utils\utilidades.py" />
     <Compile Include="ui\ventanas\ventana_combate.py" />
     <Compile Include="ui\ventanas\ventana_editar_pelea.py" />
