@@ -541,6 +541,32 @@ class PantallaPareo(ttk.Frame):
     def actualizar_bucle_red(self):
         if not getattr(self, "escuchando_red", False): return
 
+        # --- 0. DETECCIÓN INSTANTÁNEA DE CIERRE DE TORNEO ---
+        if not getattr(self, "torneo_cerrado_en_db", False):
+            conexion = self.db.conectar()
+            if conexion:
+                try:
+                    with conexion.cursor() as cur:
+                        # CORRECCIÓN: Apuntando a la tabla 'torneo' y evaluando 'fecha_fin'
+                        cur.execute("SELECT fecha_fin FROM torneo WHERE id = %s", (self.id_torneo,))
+                        res = cur.fetchone()
+                        
+                        if res and res[0] is not None:
+                            self.torneo_cerrado_en_db = True
+                            self.controller.torneo_finalizado = True
+                            self.escuchando_red = False # Apaga el motor de red permanentemente
+                            self.cerrar_panel_combate() # Cierra cualquier pelea abierta
+                            
+                            self.verificar_estado_torneo() # Transforma toda la UI
+                            self.actualizar_cartelera()    # Obliga a cambiar al Historial
+                            
+                            messagebox.showinfo("Torneo Finalizado", "El Director ha cerrado oficialmente el torneo.\n\nEl sistema de red se ha desconectado y has pasado a modo de Solo Lectura (Visitante).")
+                            return # Cortamos la ejecución
+                except Exception as e:
+                    pass
+                finally:
+                    conexion.close()
+
         # --- 1. VERIFICACIÓN DE SUPERVIVENCIA Y CAMBIOS DE ROL ---
         if not getattr(self, "torneo_cerrado_en_db", False) and hasattr(self, 'id_conexion_red') and self.id_conexion_red:
             mi_estado = self.db.verificar_estado_mi_conexion(self.id_conexion_red)
@@ -942,14 +968,29 @@ class PantallaPareo(ttk.Frame):
         # Si ya se cerró y se guardó en la BD, todos ven el botón de Exportar (Verde) y activo
         if getattr(self, "torneo_cerrado_en_db", False) or getattr(self.controller, "torneo_finalizado", False):
             self.btn_cerrar_torneo.config(text="📄 EXPORTAR REPORTE PDF", bg="#28a745", state="normal", command=self.generar_reporte_pdf)
+            
+            # --- CAMBIO: Ocultar rb_pendientes (nombre correcto) ---
+            if hasattr(self, 'rb_pendientes'):
+                try: self.rb_pendientes.pack_forget() 
+                except: pass
+                
+            if hasattr(self, 'rb_historial'):
+                self.rb_historial.config(state="normal")
+            if hasattr(self, 'filtro_cartelera'):
+                self.filtro_cartelera.set("Historial")
+                
+            if hasattr(self, 'btn_gestion_red'):
+                self.btn_gestion_red.pack_forget()
+            if hasattr(self, 'lbl_mi_tapiz_header'):
+                self.lbl_mi_tapiz_header.config(text="🏁 Torneo Finalizado (Modo Visitante)", foreground="#17a2b8")
+            
+            self.escuchando_red = False
             return
 
         # Si no se ha cerrado en BD, evaluamos los roles
         if getattr(self, "es_master", False):
-            # MODO MÁSTER: Tiene el poder de Cerrar el Torneo (Rojo)
             self.btn_cerrar_torneo.config(text="🏆 CERRAR TORNEO Y GENERAR REPORTE", bg="#ff4d4d", state="normal", command=self.cerrar_torneo)
         else:
-            # MODO CLIENTE (Guest): Ve el botón de Exportar, pero bloqueado hasta que el Master cierre
             self.btn_cerrar_torneo.config(text="📄 EXPORTAR REPORTE PDF", bg="#6c757d", state="disabled")
 
     # ================= SISTEMA DE CARTELERA (ORDEN DE COMBATES) =================
@@ -1247,7 +1288,7 @@ class PantallaPareo(ttk.Frame):
         for item in self.tree_cartelera.get_children():
             self.tree_cartelera.delete(item)
             
-        # --- CORRECCIÓN VITAL: Sincronizar el modo ANTES de procesar ---
+        # Sincronizar el modo ANTES de procesar
         self.modo_historial = (self.filtro_cartelera.get() == "Historial")
             
         # LÓGICA DE BLOQUEOS
@@ -1256,14 +1297,38 @@ class PantallaPareo(ttk.Frame):
 
         self.cartelera_bloqueada = total_bloqueadas == 0
 
-        if total_finalizados == 0:
-            self.rb_historial.config(state="disabled")
-            if self.modo_historial:
-                self.filtro_cartelera.set("Pendientes")
-                self.modo_historial = False # Lo forzamos a Pendientes
+        # --- ESCUDO DEFINITIVO PARA TORNEOS CERRADOS ---
+        if getattr(self, "torneo_cerrado_en_db", False) or getattr(self.controller, "torneo_finalizado", False):
+            if hasattr(self, 'rb_pendientes'):
+                try: self.rb_pendientes.pack_forget() 
+                except: pass
+                
+            if hasattr(self, 'rb_historial'):
+                self.rb_historial.config(state="normal") 
+                
+            # Si intentó pasarse a Pendientes, lo forzamos de vuelta a Historial
+            if not self.modo_historial:
+                self.filtro_cartelera.set("Historial")
+                self.modo_historial = True
         else:
-            self.rb_historial.config(state="normal")
-            
+            # Comportamiento normal si el torneo sigue vivo
+            if hasattr(self, 'rb_pendientes'):
+                # Si estaba oculto, lo volvemos a mostrar ANTES del de historial
+                if not self.rb_pendientes.winfo_ismapped():
+                    try: self.rb_pendientes.pack(side="left", padx=5, before=self.rb_historial) 
+                    except: pass
+                self.rb_pendientes.config(state="normal")
+                
+            if total_finalizados == 0:
+                if hasattr(self, 'rb_historial'):
+                    self.rb_historial.config(state="disabled")
+                if self.modo_historial:
+                    self.filtro_cartelera.set("Pendientes")
+                    self.modo_historial = False 
+            else:
+                if hasattr(self, 'rb_historial'):
+                    self.rb_historial.config(state="normal")
+                    
         todas_peleas = []
         
         for llave_key in self.divisiones_bloqueadas:
@@ -2564,8 +2629,17 @@ class PantallaPareo(ttk.Frame):
             exito = self.db.finalizar_torneo(self.id_torneo)
             if exito:
                 self.torneo_cerrado_en_db = True # <-- CRÍTICO: Marcamos el estado
+                self.controller.torneo_finalizado = True
+                
+                # --- NUEVO: Avisar silenciosamente a Inscripción y vaciar su tabla de inmediato ---
+                from ui.pantallas.pantalla_inscripcion import PantallaInscripcion
+                p_inscripcion = self.controller.pantallas.get(PantallaInscripcion)
+                if p_inscripcion:
+                    p_inscripcion.torneo_finalizado = True
+                    p_inscripcion.aplicar_interfaz_visitante() 
+                
                 messagebox.showinfo("Torneo Finalizado", "¡El torneo ha sido cerrado exitosamente!")
-                self.verificar_estado_torneo() # Esto cambiará el botón a verde (Exportar)
+                self.verificar_estado_torneo() 
             else:
                 messagebox.showerror("Error", "No se pudo cerrar el torneo.")
 
