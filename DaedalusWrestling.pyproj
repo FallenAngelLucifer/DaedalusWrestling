@@ -27,7 +27,11 @@
     <Compile Include="ui\pantallas\inscripcion\logica_red.py" />
     <Compile Include="ui\pantallas\inscripcion\logica_torneo.py" />
     <Compile Include="ui\pantallas\inscripcion\pantalla_inscripcion.py" />
-    <Compile Include="ui\pantallas\pantalla_pareo.py" />
+    <Compile Include="ui\pantallas\pareo\logica_cartelera.py" />
+    <Compile Include="ui\pantallas\pareo\logica_exportacion.py" />
+    <Compile Include="ui\pantallas\pareo\logica_llaves.py" />
+    <Compile Include="ui\pantallas\pareo\logica_red_pareo.py" />
+    <Compile Include="ui\pantallas\pareo\pantalla_pareo.py" />
     <Compile Include="ui\ventanas\ventana_cargar_torneo.py" />
     <Compile Include="utils\utilidades.py" />
     <Compile Include="ui\ventanas\ventana_combate.py" />
@@ -45,6 +49,7 @@
     <Folder Include="ui\" />
     <Folder Include="ui\componentes\" />
     <Folder Include="ui\pantallas\" />
+    <Folder Include="ui\pantallas\pareo\" />
     <Folder Include="ui\ventanas\" />
     <Folder Include="ui\pantallas\inscripcion\" />
     <Folder Include="utils\" />

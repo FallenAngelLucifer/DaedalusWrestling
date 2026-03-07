@@ -854,7 +854,7 @@ class LogicaTorneoMixin:
         if not self.db.sincronizar_inscripciones(self.torneo_debug_id, self.inscripciones_memoria):
             return messagebox.showerror("Error", "Fallo al guardar los atletas en la base de datos.")
 
-        from ui.pantallas.pantalla_pareo import PantallaPareo
+        from ui.pantallas.pareo.pantalla_pareo import PantallaPareo
         p_pareo = self.controller.pantallas.get(PantallaPareo)
         
         if p_pareo:

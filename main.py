@@ -5,7 +5,7 @@ import sys      # NUEVO
 import atexit   # NUEVO
 import signal   # NUEVO
 from ui.pantallas.inscripcion.pantalla_inscripcion import PantallaInscripcion
-from ui.pantallas.pantalla_pareo import PantallaPareo
+from ui.pantallas.pareo.pantalla_pareo import PantallaPareo
 from database.conexion_db import ConexionDB
 
 class AplicacionPrincipal(tk.Tk):
