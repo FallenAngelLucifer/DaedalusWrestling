@@ -22,6 +22,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="database\conexion_db.py" />
+    <Compile Include="database\queries_pareo.py" />
+    <Compile Include="database\queries_red.py" />
+    <Compile Include="database\queries_torneo.py" />
+    <Compile Include="database\queries_atletas.py" />
     <Compile Include="main.py" />
     <Compile Include="ui\pantallas\inscripcion\logica_memoria.py" />
     <Compile Include="ui\pantallas\inscripcion\logica_red.py" />
